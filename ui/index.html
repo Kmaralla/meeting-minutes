@@ -1,0 +1,1177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Meeting Notes</title>
+<script src="/ui/marked.min.js"></script>
+<script src="/ui/mermaid.min.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:       #0f1117;
+  --surface:  #1a1d27;
+  --border:   #2a2d3a;
+  --text:     #e2e8f0;
+  --muted:    #64748b;
+  --accent:   #6366f1;
+  --green:    #10b981;
+  --red:      #ef4444;
+  --email:    #0ea5e9;
+  --calendar: #10b981;
+  --notion:   #8b5cf6;
+  --research: #f59e0b;
+  --topbar-h: 54px;
+  --bottombar-h: 52px;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 14px;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Topbar ── */
+.topbar {
+  height: var(--topbar-h);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  flex-shrink: 0;
+}
+
+.app-icon { font-size: 18px; flex-shrink: 0; }
+
+#meetingName {
+  flex: 1;
+  max-width: 320px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  padding: 6px 10px;
+  outline: none;
+  transition: border-color .15s;
+}
+#meetingName:focus { border-color: var(--accent); }
+
+.status-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex-shrink: 0;
+  transition: background .3s;
+}
+.dot.live  { background: var(--green); box-shadow: 0 0 6px var(--green); animation: pulse 2s infinite; }
+.dot.ended { background: var(--muted); }
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 4px var(--green); }
+  50%       { box-shadow: 0 0 10px var(--green); }
+}
+
+#statusLabel { font-size: 12px; color: var(--muted); }
+#elapsed     { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 44px; }
+
+.btn {
+  padding: 6px 14px;
+  border-radius: 7px;
+  border: none;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity .15s, transform .1s;
+  white-space: nowrap;
+}
+.btn:active { transform: scale(.96); }
+.btn:disabled { opacity: .4; cursor: default; pointer-events: none; }
+
+.btn-primary   { background: var(--accent); color: #fff; }
+.btn-primary:hover { opacity: .85; }
+.btn-danger    { background: var(--red); color: #fff; }
+.btn-danger:hover  { opacity: .85; }
+.btn-ghost     { background: transparent; border: 1px solid var(--border); color: var(--text); }
+.btn-ghost:hover   { border-color: var(--accent); }
+.btn-start     { background: var(--green); color: #fff; }
+.btn-start:hover   { opacity: .85; }
+
+/* ── Workspace ── */
+.workspace {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.col {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-right: 1px solid var(--border);
+}
+.col:last-child { border-right: none; }
+
+.col-transcript { flex: 0 0 26%; }
+.col-notes      { flex: 0 0 34%; }
+.col-right      { flex: 1; }
+
+.col-header {
+  padding: 10px 16px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.col-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+/* ── Transcript ── */
+#transcriptBody {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text);
+}
+#transcriptBody .ts {
+  color: var(--muted);
+  font-size: 11px;
+  margin-right: 6px;
+}
+
+/* ── Notes ── */
+#notesBody {
+  font-size: 13px;
+  line-height: 1.7;
+}
+#notesBody h1, #notesBody h2 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 16px 0 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+#notesBody h2:first-child { margin-top: 0; }
+#notesBody h3 { font-size: 13px; font-weight: 600; margin: 10px 0 4px; }
+#notesBody p  { margin-bottom: 8px; color: #cbd5e1; }
+#notesBody ul, #notesBody ol { padding-left: 18px; margin-bottom: 8px; }
+#notesBody li { margin-bottom: 3px; color: #cbd5e1; }
+#notesBody strong { color: var(--text); }
+#notesBody code { background: var(--surface); padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+
+/* ── Tabs (right column) ── */
+.tab-bar {
+  display: flex;
+  gap: 2px;
+  padding: 8px 12px 0;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.tab-btn {
+  padding: 5px 12px 7px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color .15s, border-color .15s;
+}
+.tab-btn:hover  { color: var(--text); }
+.tab-btn.active { color: var(--text); border-bottom-color: var(--accent); }
+
+.tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  background: var(--accent);
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  margin-left: 5px;
+  vertical-align: middle;
+}
+
+.tab-pane { display: none; }
+.tab-pane.active { display: block; }
+
+/* ── Action cards ── */
+.filters {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.filter-btn {
+  padding: 4px 10px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all .15s;
+}
+.filter-btn:hover  { border-color: var(--accent); color: var(--text); }
+.filter-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+#cards { display: flex; flex-direction: column; gap: 8px; }
+
+.card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  transition: border-color .15s;
+}
+.card:hover { border-color: #3a3d4a; }
+.card.done  { opacity: .4; }
+.card.card-active { border-color: var(--accent); }
+
+.type-badge {
+  flex-shrink: 0;
+  padding: 2px 7px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+  margin-top: 1px;
+}
+.badge-email    { background: color-mix(in srgb, var(--email) 15%, transparent);    color: var(--email); }
+.badge-calendar { background: color-mix(in srgb, var(--calendar) 15%, transparent); color: var(--calendar); }
+.badge-notion   { background: color-mix(in srgb, var(--notion) 15%, transparent);   color: var(--notion); }
+.badge-research { background: color-mix(in srgb, var(--research) 15%, transparent); color: var(--research); }
+
+.card-body  { flex: 1; min-width: 0; }
+.card-desc  { font-size: 13px; line-height: 1.4; margin-bottom: 4px; }
+.card-meta  { display: flex; gap: 10px; font-size: 11px; color: var(--muted); }
+.card-btns  { display: flex; align-items: center; gap: 6px; flex-shrink: 0; margin-top: 2px; }
+
+.btn-act {
+  padding: 5px 11px;
+  border-radius: 6px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity .15s;
+  white-space: nowrap;
+}
+.btn-act:hover { opacity: .85; }
+.btn-act:disabled { opacity: .4; cursor: default; }
+
+.btn-done {
+  padding: 5px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all .15s;
+}
+.btn-done:hover { border-color: var(--green); color: var(--green); }
+
+/* ── Q&A ── */
+#qaBody {
+  font-size: 13px;
+  line-height: 1.7;
+}
+#qaBody strong { color: var(--text); }
+#qaBody p { margin-bottom: 10px; color: #cbd5e1; }
+#qaBody hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+
+/* ── Sketch ── */
+#sketchBody svg { max-width: 100%; }
+#sketchBody .mermaid { margin-bottom: 20px; }
+
+/* ── Action side panel (overlay) ── */
+.panel-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.5);
+  z-index: 50;
+  display: none;
+  align-items: center;
+  justify-content: flex-end;
+}
+.panel-overlay.open { display: flex; }
+
+.panel {
+  width: 420px;
+  height: 100%;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+}
+.panel-header {
+  display: flex;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  gap: 10px;
+}
+.panel-header h2 { font-size: 15px; font-weight: 600; flex: 1; }
+.btn-close {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 18px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.btn-close:hover { color: var(--text); }
+
+.panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.panel-footer {
+  padding: 14px 20px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 10px;
+}
+
+.field-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  margin-bottom: 5px;
+}
+.field-input, .field-textarea {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  padding: 7px 10px;
+  resize: vertical;
+  outline: none;
+  transition: border-color .15s;
+}
+.field-input:focus, .field-textarea:focus { border-color: var(--accent); }
+.field-textarea { min-height: 90px; line-height: 1.5; }
+
+.btn-primary-full {
+  flex: 1;
+  padding: 9px;
+  border-radius: 8px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity .15s;
+}
+.btn-primary-full:hover    { opacity: .85; }
+.btn-primary-full:disabled { opacity: .4; cursor: default; }
+
+.btn-secondary-sm {
+  padding: 9px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color .15s;
+}
+.btn-secondary-sm:hover { border-color: var(--accent); }
+
+.result-link {
+  display: inline-block;
+  color: var(--accent);
+  word-break: break-all;
+  font-size: 13px;
+}
+
+/* ── Bottom bar ── */
+.bottombar {
+  height: var(--bottombar-h);
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  flex-shrink: 0;
+}
+
+.slack-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+#slackWebhook {
+  width: 280px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  padding: 6px 10px;
+  outline: none;
+  transition: border-color .15s;
+}
+#slackWebhook:focus { border-color: var(--accent); }
+#slackWebhook.shake {
+  animation: shake .3s;
+  border-color: var(--red);
+}
+@keyframes shake {
+  0%,100% { transform: translateX(0); }
+  25%      { transform: translateX(-4px); }
+  75%      { transform: translateX(4px); }
+}
+
+/* ── Spinner / empty / toast ── */
+.spinner {
+  display: inline-block;
+  width: 14px; height: 14px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.empty {
+  text-align: center;
+  color: var(--muted);
+  padding: 40px 0;
+  font-size: 13px;
+  line-height: 2;
+}
+
+.toast {
+  position: fixed;
+  bottom: 64px;
+  right: 20px;
+  background: #1e293b;
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 9px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: all .2s;
+  pointer-events: none;
+  z-index: 200;
+  max-width: 320px;
+}
+.toast.ok    { border-color: var(--green); }
+.toast.error { border-color: var(--red); }
+.toast.show  { opacity: 1; transform: translateY(0); }
+
+/* scrollbar */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #2a2d3a; border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<!-- ── Top bar ── -->
+<header class="topbar">
+  <span class="app-icon">🎤</span>
+  <input id="meetingName" placeholder="Meeting name..." maxlength="80">
+  <div class="status-group">
+    <div class="dot" id="dot"></div>
+    <span id="statusLabel">stopped</span>
+    <span id="elapsed"></span>
+  </div>
+  <button class="btn btn-ghost" id="newSessionBtn" onclick="newSession()" title="Clear all content and start fresh">New Session</button>
+  <button class="btn btn-ghost" id="dispatchBtn" onclick="triggerDispatch()" disabled title="Run all agents on current transcript">Run Agents</button>
+  <button class="btn btn-start" id="startStopBtn" onclick="toggleRecording()">Start</button>
+</header>
+
+<!-- ── Workspace ── -->
+<div class="workspace">
+
+  <!-- Transcript -->
+  <section class="col col-transcript">
+    <div class="col-header">Live Transcript</div>
+    <div class="col-body" id="transcriptBody">
+      <div class="empty">Transcript will appear here once recording starts.</div>
+    </div>
+  </section>
+
+  <!-- Notes -->
+  <section class="col col-notes">
+    <div class="col-header">Meeting Notes</div>
+    <div class="col-body" id="notesBody">
+      <div class="empty">Notes will appear after the first agent dispatch.</div>
+    </div>
+  </section>
+
+  <!-- Right: tabs -->
+  <section class="col col-right">
+    <div class="tab-bar">
+      <button class="tab-btn active" data-tab="actions" onclick="switchTab('actions', this)">
+        Actions <span class="tab-badge" id="actionsBadge" style="display:none"></span>
+      </button>
+      <button class="tab-btn" data-tab="qa" onclick="switchTab('qa', this)">Q&A</button>
+      <button class="tab-btn" data-tab="sketch" onclick="switchTab('sketch', this)">Sketch</button>
+    </div>
+
+    <!-- Actions tab -->
+    <div class="tab-pane active col-body" id="tab-actions">
+      <div class="filters">
+        <button class="filter-btn active" data-filter="all">All</button>
+        <button class="filter-btn" data-filter="email">Email</button>
+        <button class="filter-btn" data-filter="calendar">Calendar</button>
+        <button class="filter-btn" data-filter="notion">Notion</button>
+        <button class="filter-btn" data-filter="research">Research</button>
+        <button class="filter-btn" data-filter="done">Done</button>
+      </div>
+      <div id="cards"><div class="empty">No action items yet.</div></div>
+    </div>
+
+    <!-- Q&A tab -->
+    <div class="tab-pane col-body" id="tab-qa">
+      <div id="qaBody"><div class="empty">Q&A will appear after first agent dispatch.</div></div>
+    </div>
+
+    <!-- Sketch tab -->
+    <div class="tab-pane col-body" id="tab-sketch">
+      <div id="sketchBody"><div class="empty">Diagrams will appear when meeting content warrants them.</div></div>
+    </div>
+  </section>
+
+</div>
+
+<!-- ── Bottom bar ── -->
+<footer class="bottombar">
+  <button class="btn btn-danger" id="endBtn" onclick="endMeeting()" disabled>End Meeting</button>
+  <div class="slack-group">
+    <input id="slackWebhook" type="url" placeholder="Slack webhook URL (or set SLACK_WEBHOOK_URL env var)">
+    <button class="btn btn-ghost" id="slackBtn" onclick="sendSlack()">📤 Send to Slack</button>
+  </div>
+</footer>
+
+<!-- ── Action side panel ── -->
+<div class="panel-overlay" id="panelOverlay" onclick="closePanelOnOverlay(event)">
+  <aside class="panel">
+    <div class="panel-header">
+      <h2 id="panelTitle">Action</h2>
+      <button class="btn-close" onclick="closePanel()">✕</button>
+    </div>
+    <div class="panel-body" id="panelBody"></div>
+    <div class="panel-footer" id="panelFooter"></div>
+  </aside>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });
+
+// ── State ──────────────────────────────────────────────────────────────────────
+let isRecording  = false;
+let elapsedSecs  = 0;
+let elapsedTimer = null;
+let statusPoller = null;
+let actions      = [];
+let activeFilter = 'all';
+let activeActionId = null;
+let draftData    = null;
+
+// ── Status polling ─────────────────────────────────────────────────────────────
+async function pollStatus() {
+  try {
+    const r   = await fetch('/control/status');
+    const d   = await r.json();
+    const was = isRecording;
+    isRecording = d.running;
+
+    if (isRecording !== was) {
+      updateRecordingUI();
+    }
+
+    if (isRecording && d.elapsed != null) {
+      elapsedSecs = d.elapsed;
+      updateElapsed();
+    }
+  } catch {}
+}
+
+function startPolling() {
+  if (statusPoller) return;
+  statusPoller = setInterval(pollStatus, 3000);
+}
+
+function updateElapsed() {
+  const m = Math.floor(elapsedSecs / 60);
+  const s = elapsedSecs % 60;
+  document.getElementById('elapsed').textContent = `${m}:${String(s).padStart(2,'0')}`;
+}
+
+// ── Recording control ──────────────────────────────────────────────────────────
+async function toggleRecording() {
+  const btn = document.getElementById('startStopBtn');
+  btn.disabled = true;
+
+  if (!isRecording) {
+    const res = await fetch('/control/start', { method: 'POST' });
+    const d   = await res.json();
+    if (!d.ok) { toast(d.error || 'Failed to start', 'error'); btn.disabled = false; return; }
+    isRecording = true;
+    elapsedSecs = 0;
+    startElapsedTimer();
+    updateRecordingUI();
+    connectFileStreams();
+    toast('Recording started — mic is live');
+  } else {
+    const res = await fetch('/control/stop', { method: 'POST' });
+    const d   = await res.json();
+    if (!d.ok) { toast(d.error || 'Failed to stop', 'error'); btn.disabled = false; return; }
+    isRecording = false;
+    stopElapsedTimer();
+    updateRecordingUI();
+    toast('Stopped — running final agents...');
+  }
+
+  btn.disabled = false;
+}
+
+function updateRecordingUI() {
+  const dot      = document.getElementById('dot');
+  const label    = document.getElementById('statusLabel');
+  const startBtn = document.getElementById('startStopBtn');
+  const dispatch = document.getElementById('dispatchBtn');
+  const endBtn   = document.getElementById('endBtn');
+
+  if (isRecording) {
+    dot.className       = 'dot live';
+    label.textContent   = 'recording';
+    startBtn.textContent = 'Stop';
+    startBtn.className  = 'btn btn-danger';
+    dispatch.disabled   = false;
+    endBtn.disabled     = false;
+  } else {
+    dot.className       = 'dot ended';
+    label.textContent   = 'stopped';
+    startBtn.textContent = 'Start';
+    startBtn.className  = 'btn btn-start';
+    dispatch.disabled   = true;
+    endBtn.disabled     = true;
+  }
+}
+
+function startElapsedTimer() {
+  stopElapsedTimer();
+  elapsedTimer = setInterval(() => { elapsedSecs++; updateElapsed(); }, 1000);
+}
+function stopElapsedTimer() {
+  if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+}
+
+// ── Dispatch ───────────────────────────────────────────────────────────────────
+async function triggerDispatch() {
+  const btn = document.getElementById('dispatchBtn');
+  btn.disabled = true;
+  btn.textContent = 'Running...';
+  try {
+    const r = await fetch('/control/dispatch', { method: 'POST' });
+    const d = await r.json();
+    if (!d.ok) toast(d.error || 'Dispatch failed', 'error');
+    else toast('Agents running...');
+  } catch (e) {
+    toast(String(e), 'error');
+  }
+  setTimeout(() => {
+    btn.disabled = !isRecording;
+    btn.textContent = 'Run Agents';
+  }, 3000);
+}
+
+// ── New Session ────────────────────────────────────────────────────────────────
+async function newSession() {
+  if (isRecording && !confirm('This will stop the current recording and clear all content. Continue?')) return;
+
+  await fetch('/control/new-session', { method: 'POST' });
+
+  // Reset UI
+  isRecording = false;
+  elapsedSecs = 0;
+  stopElapsedTimer();
+  updateRecordingUI();
+  document.getElementById('meetingName').value = '';
+  document.getElementById('elapsed').textContent = '';
+
+  // Clear all panels
+  document.getElementById('transcriptBody').innerHTML = '<div class="empty">Transcript will appear here once recording starts.</div>';
+  document.getElementById('notesBody').innerHTML     = '<div class="empty">Notes will appear after the first agent dispatch.</div>';
+  document.getElementById('qaBody').innerHTML        = '<div class="empty">Q&A will appear after first agent dispatch.</div>';
+  document.getElementById('sketchBody').innerHTML    = '<div class="empty">Diagrams will appear when meeting content warrants them.</div>';
+  actions = [];
+  renderCards();
+
+  toast('Ready for new session', 'ok');
+}
+
+// ── End Meeting ────────────────────────────────────────────────────────────────
+async function endMeeting() {
+  if (!confirm('End the meeting and run final agents?')) return;
+
+  if (isRecording) {
+    await fetch('/control/stop', { method: 'POST' });
+    isRecording = false;
+    stopElapsedTimer();
+    updateRecordingUI();
+    toast('Meeting ended — running final agents. Send to Slack when ready.');
+  }
+
+  document.getElementById('slackBtn').classList.add('btn-primary');
+  document.getElementById('slackBtn').classList.remove('btn-ghost');
+}
+
+// ── File SSE streams ───────────────────────────────────────────────────────────
+const _streams = {};
+
+function connectFileStreams() {
+  connectStream('transcript', data => renderTranscript(data.content));
+  connectStream('notes',      data => renderNotes(data.content));
+  connectStream('qa',         data => renderQA(data.content));
+  connectStream('sketch',     data => renderSketch(data.content));
+}
+
+function connectStream(name, handler) {
+  if (_streams[name]) { _streams[name].close(); }
+  const es = new EventSource(`/files/stream/${name}`);
+  es.onmessage = e => { try { handler(JSON.parse(e.data)); } catch {} };
+  _streams[name] = es;
+}
+
+// ── Transcript renderer ────────────────────────────────────────────────────────
+function renderTranscript(content) {
+  if (!content?.trim()) return;
+  const el     = document.getElementById('transcriptBody');
+  const atBot  = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+  el.innerHTML = marked.parse(content);
+  if (atBot) el.scrollTop = el.scrollHeight;
+}
+
+// ── Notes renderer ─────────────────────────────────────────────────────────────
+function renderNotes(content) {
+  if (!content?.trim()) return;
+  const el = document.getElementById('notesBody');
+  el.innerHTML = marked.parse(content);
+}
+
+// ── Q&A renderer ──────────────────────────────────────────────────────────────
+function renderQA(content) {
+  if (!content?.trim()) return;
+  const el = document.getElementById('qaBody');
+  el.innerHTML = marked.parse(content);
+}
+
+// ── Sketch renderer ────────────────────────────────────────────────────────────
+async function renderSketch(content) {
+  if (!content?.trim()) return;
+  const el = document.getElementById('sketchBody');
+  const blocks = [...content.matchAll(/```mermaid\n([\s\S]*?)```/g)];
+  if (!blocks.length) {
+    el.innerHTML = '<div class="empty">No diagrams yet...</div>';
+    return;
+  }
+  el.innerHTML = '';
+  for (let i = 0; i < blocks.length; i++) {
+    const code  = blocks[i][1].trim();
+    const div   = document.createElement('div');
+    div.className = 'mermaid';
+    el.appendChild(div);
+    try {
+      const id      = `mermaid-${Date.now()}-${i}`;
+      const { svg } = await mermaid.render(id, code);
+      div.innerHTML  = svg;
+    } catch (e) {
+      div.innerHTML = `<pre style="color:var(--red);font-size:11px">${esc(String(e))}</pre>`;
+    }
+  }
+}
+
+// ── Actions SSE ───────────────────────────────────────────────────────────────
+function connectActionsStream() {
+  const es = new EventSource('/actions/stream');
+  es.onmessage = e => {
+    try { actions = JSON.parse(e.data); renderCards(); } catch {}
+  };
+  es.onerror = () => { es.close(); setTimeout(connectActionsStream, 4000); };
+}
+
+// ── Cards renderer ─────────────────────────────────────────────────────────────
+const ACT_LABELS = {
+  email:    'Draft Email',
+  calendar: 'Add to Calendar',
+  notion:   'Add to Notion',
+  research: 'Research',
+};
+
+function renderCards() {
+  const filtered = actions.filter(a => {
+    if (activeFilter === 'done') return a.status === 'done';
+    if (activeFilter !== 'all') return a.type === activeFilter && a.status !== 'done';
+    return a.status !== 'done';
+  });
+
+  const pending = actions.filter(a => a.status !== 'done').length;
+  const badge   = document.getElementById('actionsBadge');
+  if (pending > 0) {
+    badge.textContent = pending;
+    badge.style.display = '';
+  } else {
+    badge.style.display = 'none';
+  }
+
+  const el = document.getElementById('cards');
+  if (!filtered.length) {
+    el.innerHTML = `<div class="empty">${activeFilter === 'done' ? 'No completed actions.' : 'No action items yet.'}</div>`;
+    return;
+  }
+
+  el.innerHTML = filtered.map(a => `
+    <div class="card ${a.status === 'done' ? 'done' : ''} ${a.id === activeActionId ? 'card-active' : ''}" id="card-${a.id}">
+      <span class="type-badge badge-${a.type}">${a.type}</span>
+      <div class="card-body">
+        <div class="card-desc">${esc(a.description)}</div>
+        <div class="card-meta">
+          ${a.owner    ? `<span>👤 ${esc(a.owner)}</span>` : ''}
+          ${a.deadline ? `<span>📅 ${esc(a.deadline)}</span>` : ''}
+        </div>
+      </div>
+      <div class="card-btns">
+        ${a.status !== 'done' ? `
+          <button class="btn-act" onclick="actOn('${a.id}')">${ACT_LABELS[a.type] || 'Act'}</button>
+          <button class="btn-done" title="Mark done" onclick="markDone('${a.id}')">✓</button>
+        ` : `<span style="color:var(--muted);font-size:11px">done</span>`}
+      </div>
+    </div>`
+  ).join('');
+}
+
+// ── Filters ────────────────────────────────────────────────────────────────────
+document.querySelectorAll('.filter-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    activeFilter = btn.dataset.filter;
+    renderCards();
+  });
+});
+
+// ── Act on card ────────────────────────────────────────────────────────────────
+async function actOn(id) {
+  const action = actions.find(a => a.id === id);
+  if (!action) return;
+  activeActionId = id;
+  renderCards();
+  openPanel(action);
+  document.getElementById('panelBody').innerHTML =
+    `<div style="color:var(--muted)"><span class="spinner"></span>Preparing ${action.type}...</div>`;
+  document.getElementById('panelFooter').innerHTML = '';
+  try {
+    const res = await fetch('/act/draft', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(action),
+    });
+    draftData = await res.json();
+    if (draftData.error) { showPanelError(draftData.error); return; }
+    renderPanel(action, draftData);
+  } catch (e) {
+    showPanelError(String(e));
+  }
+}
+
+function openPanel(action) {
+  document.getElementById('panelTitle').textContent = ACT_LABELS[action.type] || 'Action';
+  document.getElementById('panelOverlay').classList.add('open');
+}
+
+function closePanel() {
+  document.getElementById('panelOverlay').classList.remove('open');
+  activeActionId = null;
+  draftData = null;
+  renderCards();
+}
+
+function closePanelOnOverlay(e) {
+  if (e.target === document.getElementById('panelOverlay')) closePanel();
+}
+
+function renderPanel(action, data) {
+  const body   = document.getElementById('panelBody');
+  const footer = document.getElementById('panelFooter');
+
+  if (action.type === 'email') {
+    body.innerHTML = `
+      <div><div class="field-label">Subject</div><input class="field-input" id="emailSubject" value="${esc(data.subject || '')}"></div>
+      <div><div class="field-label">Body</div><textarea class="field-textarea" id="emailBody" rows="12">${esc(data.body || '')}</textarea></div>`;
+    footer.innerHTML = `
+      <button class="btn-primary-full" onclick="copyEmail()">Copy to Clipboard</button>
+      <button class="btn-secondary-sm" onclick="openMailto()">Open in Mail</button>`;
+
+  } else if (action.type === 'calendar') {
+    body.innerHTML = `
+      <div><div class="field-label">Title</div><input class="field-input" id="calSummary" value="${esc(data.summary || '')}"></div>
+      <div><div class="field-label">Start (YYYY-MM-DDTHH:MM)</div><input class="field-input" id="calStart" value="${esc(data.start || '')}"></div>
+      <div><div class="field-label">Duration (minutes)</div><input class="field-input" id="calDuration" type="number" value="${data.duration_minutes || 60}"></div>
+      <div><div class="field-label">Attendees (comma-separated)</div><input class="field-input" id="calAttendees" placeholder="alice@co.com, bob@co.com"></div>
+      <div><div class="field-label">Description</div><textarea class="field-textarea" id="calDesc" rows="4">${esc(data.description || '')}</textarea></div>`;
+    footer.innerHTML = `
+      <button class="btn-primary-full" id="calBtn" onclick="createCalEvent('${action.id}')">Create Event</button>
+      <button class="btn-secondary-sm" onclick="closePanel()">Cancel</button>`;
+
+  } else if (action.type === 'notion') {
+    body.innerHTML = `
+      <div><div class="field-label">Title</div><input class="field-input" id="notionTitle" value="${esc(data.title || '')}"></div>
+      <div><div class="field-label">Owner</div><input class="field-input" id="notionOwner" value="${esc(data.owner || '')}"></div>
+      <div><div class="field-label">Due Date (YYYY-MM-DD)</div><input class="field-input" id="notionDeadline" value="${esc(data.deadline || '')}"></div>
+      <div><div class="field-label">Notes</div><textarea class="field-textarea" id="notionContext" rows="5">${esc(data.context || '')}</textarea></div>`;
+    footer.innerHTML = `
+      <button class="btn-primary-full" id="notionBtn" onclick="createNotionPage('${action.id}')">Add to Notion</button>
+      <button class="btn-secondary-sm" onclick="closePanel()">Cancel</button>`;
+
+  } else if (action.type === 'research') {
+    body.innerHTML = `
+      <div class="field-label">Research Brief</div>
+      <div style="line-height:1.7;font-size:13px;white-space:pre-wrap;color:#cbd5e1">${esc(data.brief || '')}</div>`;
+    footer.innerHTML = `
+      <button class="btn-primary-full" onclick="copyResearch()">Copy Brief</button>
+      <button class="btn-secondary-sm" onclick="closePanel()">Close</button>`;
+  }
+}
+
+function showPanelError(msg) {
+  document.getElementById('panelBody').innerHTML =
+    `<div style="color:var(--red);font-size:13px">${esc(msg)}</div>`;
+  document.getElementById('panelFooter').innerHTML =
+    `<button class="btn-secondary-sm" onclick="closePanel()">Close</button>`;
+}
+
+// ── Mark done ──────────────────────────────────────────────────────────────────
+async function markDone(id) {
+  await fetch('/actions/done', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id }),
+  });
+  const a = actions.find(a => a.id === id);
+  if (a) a.status = 'done';
+  renderCards();
+  if (activeActionId === id) closePanel();
+}
+
+// ── Calendar ───────────────────────────────────────────────────────────────────
+async function createCalEvent(actionId) {
+  const btn = document.getElementById('calBtn');
+  btn.disabled = true; btn.textContent = 'Creating...';
+  const attendees = document.getElementById('calAttendees').value
+    .split(',').map(s => s.trim()).filter(Boolean);
+  const data = {
+    summary:          document.getElementById('calSummary').value,
+    start:            document.getElementById('calStart').value,
+    duration_minutes: parseInt(document.getElementById('calDuration').value) || 60,
+    description:      document.getElementById('calDesc').value,
+    attendees,
+    timezone: draftData?.timezone || 'America/New_York',
+  };
+  try {
+    const res    = await fetch('/act/execute', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ type: 'calendar', data }) });
+    const result = await res.json();
+    if (result.error) { toast(result.error, 'error'); btn.disabled = false; btn.textContent = 'Create Event'; return; }
+    document.getElementById('panelBody').innerHTML +=
+      `<div style="margin-top:12px"><div class="field-label">Created</div><a class="result-link" href="${result.link}" target="_blank">${result.link}</a></div>`;
+    markDone(actionId);
+    toast('Event created!', 'ok');
+  } catch (e) { toast(String(e), 'error'); btn.disabled = false; btn.textContent = 'Create Event'; }
+}
+
+// ── Notion ─────────────────────────────────────────────────────────────────────
+async function createNotionPage(actionId) {
+  const btn = document.getElementById('notionBtn');
+  btn.disabled = true; btn.textContent = 'Adding...';
+  const data = {
+    title:    document.getElementById('notionTitle').value,
+    owner:    document.getElementById('notionOwner').value,
+    deadline: document.getElementById('notionDeadline').value,
+    context:  document.getElementById('notionContext').value,
+  };
+  try {
+    const res    = await fetch('/act/execute', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ type: 'notion', data }) });
+    const result = await res.json();
+    if (result.error) { toast(result.error, 'error'); btn.disabled = false; btn.textContent = 'Add to Notion'; return; }
+    document.getElementById('panelBody').innerHTML +=
+      `<div style="margin-top:12px"><div class="field-label">Created</div><a class="result-link" href="${result.url}" target="_blank">${result.url}</a></div>`;
+    markDone(actionId);
+    toast('Added to Notion!', 'ok');
+  } catch (e) { toast(String(e), 'error'); btn.disabled = false; btn.textContent = 'Add to Notion'; }
+}
+
+// ── Email ──────────────────────────────────────────────────────────────────────
+function copyEmail() {
+  const subject = document.getElementById('emailSubject').value;
+  const body    = document.getElementById('emailBody').value;
+  navigator.clipboard.writeText(`Subject: ${subject}\n\n${body}`)
+    .then(() => toast('Copied to clipboard', 'ok'))
+    .catch(() => toast('Copy failed — select text manually', 'error'));
+}
+function openMailto() {
+  const subject = encodeURIComponent(document.getElementById('emailSubject').value);
+  const body    = encodeURIComponent(document.getElementById('emailBody').value);
+  window.open(`mailto:?subject=${subject}&body=${body}`);
+}
+
+// ── Research ───────────────────────────────────────────────────────────────────
+function copyResearch() {
+  navigator.clipboard.writeText(draftData?.brief || '')
+    .then(() => toast('Copied', 'ok'))
+    .catch(() => toast('Copy failed', 'error'));
+}
+
+// ── Tabs ───────────────────────────────────────────────────────────────────────
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById(`tab-${name}`).classList.add('active');
+}
+
+// ── Slack ──────────────────────────────────────────────────────────────────────
+async function sendSlack() {
+  const webhookInput = document.getElementById('slackWebhook');
+  const webhook = webhookInput.value.trim();
+  if (!webhook) {
+    webhookInput.classList.add('shake');
+    setTimeout(() => webhookInput.classList.remove('shake'), 400);
+    toast('Enter a Slack webhook URL', 'error');
+    return;
+  }
+  const btn = document.getElementById('slackBtn');
+  btn.disabled = true;
+  btn.textContent = 'Sending...';
+  try {
+    const res = await fetch('/slack/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        webhook_url:  webhook,
+        meeting_name: document.getElementById('meetingName').value.trim(),
+      }),
+    });
+    const d = await res.json();
+    if (d.error) { toast(d.error, 'error'); }
+    else { toast('Sent to Slack ✓', 'ok'); }
+  } catch (e) {
+    toast(String(e), 'error');
+  }
+  btn.disabled = false;
+  btn.textContent = '📤 Send to Slack';
+}
+
+// ── Toast ──────────────────────────────────────────────────────────────────────
+function toast(msg, type = '') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className   = `toast${type ? ' ' + type : ''} show`;
+  setTimeout(() => el.classList.remove('show'), 3500);
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ── Boot ───────────────────────────────────────────────────────────────────────
+(async () => {
+  // Load existing file content
+  for (const [name, handler] of [
+    ['transcript', c => renderTranscript(c)],
+    ['notes',      c => renderNotes(c)],
+    ['qa',         c => renderQA(c)],
+    ['sketch',     c => renderSketch(c)],
+  ]) {
+    try {
+      const r = await fetch(`/files/${name}`);
+      const d = await r.json();
+      if (d.content) handler(d.content);
+    } catch {}
+  }
+
+  // Load existing actions
+  try {
+    const r = await fetch('/actions');
+    actions = await r.json();
+    renderCards();
+  } catch {}
+
+  // Check if already recording (e.g. started externally)
+  await pollStatus();
+  if (isRecording) connectFileStreams();
+
+  // Start background polling + actions stream
+  startPolling();
+  connectActionsStream();
+})();
+</script>
+</body>
+</html>

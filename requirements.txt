@@ -1,0 +1,9 @@
+faster-whisper>=1.0.0
+sounddevice>=0.4.6
+numpy>=1.24.0
+fastapi>=0.110.0
+uvicorn>=0.27.0
+notion-client>=2.2.0
+google-api-python-client>=2.120.0
+google-auth-httplib2>=0.2.0
+google-auth-oauthlib>=1.2.0

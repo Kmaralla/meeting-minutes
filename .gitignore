@@ -1,0 +1,8 @@
+meetingenv/
+__pycache__/
+*.pyc
+.env
+*.log
+output/
+ui/mermaid.min.js
+ui/marked.min.js
