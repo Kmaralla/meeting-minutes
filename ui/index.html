@@ -523,6 +523,96 @@ body {
 ::-webkit-scrollbar { width: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #2a2d3a; border-radius: 3px; }
+
+/* ── Custom agent tab close ── */
+.tab-close {
+  margin-left: 5px;
+  opacity: .45;
+  font-size: 15px;
+  line-height: 1;
+  transition: opacity .15s;
+  vertical-align: middle;
+}
+.tab-close:hover { opacity: 1; }
+
+.tab-add {
+  color: var(--accent);
+  border: 1px dashed color-mix(in srgb, var(--accent) 50%, transparent);
+  border-radius: 5px;
+  padding: 3px 9px;
+  margin-left: 4px;
+  font-size: 11px;
+  background: transparent;
+  cursor: pointer;
+  transition: all .15s;
+}
+.tab-add:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: var(--accent);
+}
+
+/* ── Add-Agent modal ── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.55);
+  z-index: 100;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+.modal-overlay.open { display: flex; }
+
+.modal {
+  width: 560px;
+  max-height: 82vh;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 24px 48px rgba(0,0,0,.4);
+}
+.modal-header {
+  display: flex;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  gap: 10px;
+}
+.modal-header h2 { font-size: 15px; font-weight: 600; flex: 1; }
+.modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.modal-footer {
+  padding: 14px 20px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 10px;
+}
+
+.suggestion-btn {
+  padding: 5px 12px;
+  border-radius: 20px;
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all .15s;
+  font-family: inherit;
+}
+.suggestion-btn:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
 </style>
 </head>
 <body>
@@ -537,8 +627,8 @@ body {
     <span id="elapsed"></span>
   </div>
   <button class="btn btn-ghost" id="newSessionBtn" onclick="newSession()" title="Clear all content and start fresh">New Session</button>
-  <button class="btn btn-ghost" id="dispatchBtn" onclick="triggerDispatch()" disabled title="Run all agents on current transcript">Run Agents</button>
-  <button class="btn btn-start" id="startStopBtn" onclick="toggleRecording()">Start</button>
+  <button class="btn btn-ghost" id="dispatchBtn" onclick="triggerDispatch()" disabled title="Send transcript to Claude — generates notes, actions, Q&amp;A, and diagrams">Generate Notes</button>
+  <button class="btn btn-start" id="startStopBtn" onclick="toggleRecording()">Start Recording</button>
 </header>
 
 <!-- ── Workspace ── -->
@@ -546,28 +636,36 @@ body {
 
   <!-- Transcript -->
   <section class="col col-transcript">
-    <div class="col-header">Live Transcript</div>
+    <div class="col-header">
+      Live Transcript
+      <span id="transcriptHint" style="font-weight:400;font-size:10px;color:var(--green);display:none">● live</span>
+    </div>
     <div class="col-body" id="transcriptBody">
-      <div class="empty">Transcript will appear here once recording starts.</div>
+      <div class="empty">Start recording — your words appear here as you speak.</div>
     </div>
   </section>
 
   <!-- Notes -->
   <section class="col col-notes">
-    <div class="col-header">Meeting Notes</div>
+    <div class="col-header">
+      Meeting Notes
+      <span style="font-weight:400;font-size:10px;color:var(--muted);margin-left:auto">click Generate Notes →</span>
+    </div>
     <div class="col-body" id="notesBody">
-      <div class="empty">Notes will appear after the first agent dispatch.</div>
+      <div class="empty">Click <strong>Generate Notes</strong> to summarize transcript with AI.</div>
     </div>
   </section>
 
   <!-- Right: tabs -->
   <section class="col col-right">
-    <div class="tab-bar">
+    <div class="tab-bar" id="tabBar">
       <button class="tab-btn active" data-tab="actions" onclick="switchTab('actions', this)">
         Actions <span class="tab-badge" id="actionsBadge" style="display:none"></span>
       </button>
-      <button class="tab-btn" data-tab="qa" onclick="switchTab('qa', this)">Q&A</button>
+      <button class="tab-btn" data-tab="qa" onclick="switchTab('qa', this)">Q&amp;A</button>
       <button class="tab-btn" data-tab="sketch" onclick="switchTab('sketch', this)">Sketch</button>
+      <!-- custom agent tabs injected here -->
+      <button class="tab-add" id="addAgentBtn" onclick="openAddAgentModal()" title="Add a custom AI agent">+ Agent</button>
     </div>
 
     <!-- Actions tab -->
@@ -619,29 +717,76 @@ body {
 
 <div class="toast" id="toast"></div>
 
+<!-- ── Add Agent modal ── -->
+<div class="modal-overlay" id="addAgentModal" onclick="closeModalOnOverlay(event)">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>Add Custom Agent</h2>
+      <button class="btn-close" onclick="closeAddAgentModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div>
+        <div class="field-label">Agent Name</div>
+        <input class="field-input" id="agentName" placeholder="e.g. Sales Coach, Risk Analyst, Legal Reviewer…" autocomplete="off">
+      </div>
+      <div>
+        <div class="field-label">Prompt — what should this agent do with the transcript?</div>
+        <textarea class="field-textarea" id="agentPrompt" rows="9"
+          placeholder="You are a [role] monitoring a live meeting. Based on the transcript, identify…&#10;&#10;Output format: bullet points / structured sections / etc."></textarea>
+      </div>
+      <div>
+        <div class="field-label" style="margin-bottom:8px">Quick-start templates</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="suggestion-btn" onclick="fillAgentTemplate('sales')">Sales Coach</button>
+          <button class="suggestion-btn" onclick="fillAgentTemplate('tech')">Tech Reviewer</button>
+          <button class="suggestion-btn" onclick="fillAgentTemplate('risk')">Risk Analyst</button>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-primary-full" id="saveAgentBtn" onclick="saveCustomAgent()">Add Agent</button>
+      <button class="btn-secondary-sm" onclick="closeAddAgentModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <script>
 mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });
 
 // ── State ──────────────────────────────────────────────────────────────────────
-let isRecording  = false;
-let elapsedSecs  = 0;
-let elapsedTimer = null;
-let statusPoller = null;
-let actions      = [];
-let activeFilter = 'all';
+let isRecording    = false;
+let _userStopped   = false;   // true while user explicitly stopped but process still finalizing
+let elapsedSecs    = 0;
+let elapsedTimer   = null;
+let statusPoller   = null;
+let actions        = [];
+let activeFilter   = 'all';
 let activeActionId = null;
-let draftData    = null;
+let draftData      = null;
 
 // ── Status polling ─────────────────────────────────────────────────────────────
 async function pollStatus() {
   try {
-    const r   = await fetch('/control/status');
-    const d   = await r.json();
-    const was = isRecording;
+    const r = await fetch('/control/status');
+    const d = await r.json();
+
+    // If user explicitly stopped, wait for the process to actually exit before
+    // allowing the poller to flip the UI back to recording.
+    if (_userStopped) {
+      if (!d.running) {
+        _userStopped = false;   // process finally exited — sync UI
+        isRecording  = false;
+        updateRecordingUI();
+      }
+      return;
+    }
+
+    const was   = isRecording;
     isRecording = d.running;
 
     if (isRecording !== was) {
       updateRecordingUI();
+      if (isRecording) connectFileStreams();
     }
 
     if (isRecording && d.elapsed != null) {
@@ -653,7 +798,7 @@ async function pollStatus() {
 
 function startPolling() {
   if (statusPoller) return;
-  statusPoller = setInterval(pollStatus, 3000);
+  statusPoller = setInterval(pollStatus, 1000);
 }
 
 function updateElapsed() {
@@ -666,27 +811,32 @@ function updateElapsed() {
 async function toggleRecording() {
   const btn = document.getElementById('startStopBtn');
   btn.disabled = true;
-
-  if (!isRecording) {
-    const res = await fetch('/control/start', { method: 'POST' });
-    const d   = await res.json();
-    if (!d.ok) { toast(d.error || 'Failed to start', 'error'); btn.disabled = false; return; }
-    isRecording = true;
-    elapsedSecs = 0;
-    startElapsedTimer();
-    updateRecordingUI();
-    connectFileStreams();
-    toast('Recording started — mic is live');
-  } else {
-    const res = await fetch('/control/stop', { method: 'POST' });
-    const d   = await res.json();
-    if (!d.ok) { toast(d.error || 'Failed to stop', 'error'); btn.disabled = false; return; }
-    isRecording = false;
-    stopElapsedTimer();
-    updateRecordingUI();
-    toast('Stopped — running final agents...');
+  try {
+    if (!isRecording) {
+      const res = await fetch('/control/start', { method: 'POST' });
+      const d   = await res.json();
+      if (!d.ok) { toast(d.error || 'Failed to start', 'error'); return; }
+      isRecording  = true;
+      _userStopped = false;
+      elapsedSecs  = 0;
+      startElapsedTimer();
+      updateRecordingUI();
+      connectFileStreams();
+      connectActionsStream();
+      toast('Recording started — mic is live');
+    } else {
+      const res = await fetch('/control/stop', { method: 'POST' });
+      const d   = await res.json();
+      if (!d.ok) { toast(d.error || 'Failed to stop', 'error'); return; }
+      isRecording  = false;
+      _userStopped = true;   // block poller from flipping back until process exits
+      stopElapsedTimer();
+      updateRecordingUI();
+      toast('Stopped — generating final notes (~60s)…');
+    }
+  } catch (e) {
+    toast('Error: ' + e.message, 'error');
   }
-
   btn.disabled = false;
 }
 
@@ -697,20 +847,35 @@ function updateRecordingUI() {
   const dispatch = document.getElementById('dispatchBtn');
   const endBtn   = document.getElementById('endBtn');
 
+  const hint = document.getElementById('transcriptHint');
   if (isRecording) {
-    dot.className       = 'dot live';
-    label.textContent   = 'recording';
-    startBtn.textContent = 'Stop';
-    startBtn.className  = 'btn btn-danger';
-    dispatch.disabled   = false;
-    endBtn.disabled     = false;
+    dot.className        = 'dot live';
+    label.textContent    = 'recording';
+    startBtn.textContent = 'Stop Recording';
+    startBtn.className   = 'btn btn-danger';
+    dispatch.disabled    = false;
+    endBtn.disabled      = false;
+    endBtn.textContent   = 'End Meeting';
+    if (hint) hint.style.display = '';
+  } else if (_userStopped) {
+    dot.className        = 'dot live';   // keep dot pulsing — agents still running
+    label.textContent    = 'finalizing';
+    startBtn.textContent = 'Start Recording';
+    startBtn.className   = 'btn btn-start';
+    startBtn.disabled    = true;         // don't allow restart while finalizing
+    dispatch.disabled    = true;
+    endBtn.disabled      = true;
+    if (hint) hint.style.display = 'none';
   } else {
-    dot.className       = 'dot ended';
-    label.textContent   = 'stopped';
-    startBtn.textContent = 'Start';
-    startBtn.className  = 'btn btn-start';
-    dispatch.disabled   = true;
-    endBtn.disabled     = true;
+    dot.className        = 'dot ended';
+    label.textContent    = 'stopped';
+    startBtn.textContent = 'Start Recording';
+    startBtn.className   = 'btn btn-start';
+    startBtn.disabled    = false;
+    dispatch.disabled    = true;
+    endBtn.disabled      = true;
+    endBtn.textContent   = 'End Meeting';
+    if (hint) hint.style.display = 'none';
   }
 }
 
@@ -723,31 +888,42 @@ function stopElapsedTimer() {
 }
 
 // ── Dispatch ───────────────────────────────────────────────────────────────────
+let _dispatchTimer = null;
 async function triggerDispatch() {
   const btn = document.getElementById('dispatchBtn');
   btn.disabled = true;
-  btn.textContent = 'Running...';
+  btn.innerHTML = '<span class="spinner"></span>Agents running…';
+  if (_dispatchTimer) clearTimeout(_dispatchTimer);
   try {
     const r = await fetch('/control/dispatch', { method: 'POST' });
     const d = await r.json();
-    if (!d.ok) toast(d.error || 'Dispatch failed', 'error');
-    else toast('Agents running...');
+    if (!d.ok) { toast(d.error || 'Dispatch failed', 'error'); }
+    else { toast('Agents running — results will update live'); }
   } catch (e) {
     toast(String(e), 'error');
   }
-  setTimeout(() => {
+  // Re-enable after enough time for agents to finish (~60s max, but allow re-trigger after 15s)
+  _dispatchTimer = setTimeout(() => {
     btn.disabled = !isRecording;
     btn.textContent = 'Run Agents';
-  }, 3000);
+  }, 15000);
 }
 
 // ── New Session ────────────────────────────────────────────────────────────────
 async function newSession() {
   if (isRecording && !confirm('This will stop the current recording and clear all content. Continue?')) return;
 
+  closeAllStreams();
   await fetch('/control/new-session', { method: 'POST' });
+  connectActionsStream();
+  // Reset custom agent pane content and reconnect streams
+  for (const ca of customAgents) {
+    const el = document.getElementById(`tab-custom-${ca.id}`);
+    if (el) el.innerHTML = '<div class="empty">⏳ Waiting for next agent dispatch…</div>';
+    connectCustomAgentStream(ca);
+  }
 
-  // Reset UI
+  // Reset UI state
   isRecording = false;
   elapsedSecs = 0;
   stopElapsedTimer();
@@ -768,16 +944,25 @@ async function newSession() {
 
 // ── End Meeting ────────────────────────────────────────────────────────────────
 async function endMeeting() {
-  if (!confirm('End the meeting and run final agents?')) return;
+  if (!confirm('End the meeting? Final notes will be generated (~60s) then you can send to Slack.')) return;
 
-  if (isRecording) {
-    await fetch('/control/stop', { method: 'POST' });
-    isRecording = false;
-    stopElapsedTimer();
-    updateRecordingUI();
-    toast('Meeting ended — running final agents. Send to Slack when ready.');
+  const endBtn = document.getElementById('endBtn');
+  endBtn.disabled    = true;
+  endBtn.textContent = 'Ending…';
+
+  try {
+    if (isRecording) {
+      await fetch('/control/stop', { method: 'POST' });
+      isRecording  = false;
+      _userStopped = true;
+      stopElapsedTimer();
+      updateRecordingUI();
+    }
+  } catch (e) {
+    toast('Error stopping: ' + e.message, 'error');
   }
 
+  toast('Meeting ended — final notes generating now (~60s). Results update live.');
   document.getElementById('slackBtn').classList.add('btn-primary');
   document.getElementById('slackBtn').classList.remove('btn-ghost');
 }
@@ -792,10 +977,20 @@ function connectFileStreams() {
   connectStream('sketch',     data => renderSketch(data.content));
 }
 
+function closeAllStreams() {
+  Object.values(_streams).forEach(es => { try { es.close(); } catch {} });
+  Object.keys(_streams).forEach(k => delete _streams[k]);
+}
+
 function connectStream(name, handler) {
   if (_streams[name]) { _streams[name].close(); }
   const es = new EventSource(`/files/stream/${name}`);
   es.onmessage = e => { try { handler(JSON.parse(e.data)); } catch {} };
+  es.onerror   = () => {
+    es.close();
+    delete _streams[name];
+    if (isRecording) setTimeout(() => connectStream(name, handler), 2000);
+  };
   _streams[name] = es;
 }
 
@@ -849,11 +1044,13 @@ async function renderSketch(content) {
 
 // ── Actions SSE ───────────────────────────────────────────────────────────────
 function connectActionsStream() {
+  if (_streams['_actions']) { _streams['_actions'].close(); }
   const es = new EventSource('/actions/stream');
   es.onmessage = e => {
     try { actions = JSON.parse(e.data); renderCards(); } catch {}
   };
-  es.onerror = () => { es.close(); setTimeout(connectActionsStream, 4000); };
+  es.onerror = () => { es.close(); delete _streams['_actions']; setTimeout(connectActionsStream, 2000); };
+  _streams['_actions'] = es;
 }
 
 // ── Cards renderer ─────────────────────────────────────────────────────────────
@@ -1141,36 +1338,219 @@ function esc(s) {
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-// ── Boot ───────────────────────────────────────────────────────────────────────
-(async () => {
-  // Load existing file content
-  for (const [name, handler] of [
-    ['transcript', c => renderTranscript(c)],
-    ['notes',      c => renderNotes(c)],
-    ['qa',         c => renderQA(c)],
-    ['sketch',     c => renderSketch(c)],
-  ]) {
-    try {
-      const r = await fetch(`/files/${name}`);
-      const d = await r.json();
-      if (d.content) handler(d.content);
-    } catch {}
+// ── Custom agents ─────────────────────────────────────────────────────────────
+let customAgents = [];
+
+const AGENT_TEMPLATES = {
+  sales: {
+    name: 'Sales Coach',
+    prompt: `You are a real-time sales coaching assistant monitoring a live sales call.
+Based on the transcript, continuously identify:
+- **Objections** being raised and how to handle them
+- **Buying signals** and areas of genuine interest
+- **Next questions** the rep should ask to move the deal forward
+- **Pain points** the prospect has mentioned
+
+Output concise, actionable coaching tips as bullet points. Update as the conversation evolves.
+If nothing relevant yet, output: _Waiting for sales conversation..._`
+  },
+  tech: {
+    name: 'Tech Reviewer',
+    prompt: `You are a technical reviewer analyzing a live engineering or product meeting.
+Based on the transcript, identify:
+- **Architectural decisions** being made or debated
+- **Technical risks** and potential failure points
+- **Unclear requirements** or missing specifications
+- **Proposed solutions** and their trade-offs
+
+Output a structured technical review with sections. Update as new details emerge.
+If nothing technical yet, output: _Waiting for technical discussion..._`
+  },
+  risk: {
+    name: 'Risk Analyst',
+    prompt: `You are a risk analyst monitoring a business meeting.
+Based on the transcript, identify and maintain a live risk register:
+
+For each risk use this format:
+**[🔴 High / 🟡 Medium / 🟢 Low]** Risk description
+- *Trigger:* what was said that flagged this
+- *Mitigation:* suggested action
+
+Also note any blockers, dependencies, or critical unknowns.
+If nothing to flag yet, output: _No risks identified yet..._`
+  }
+};
+
+async function loadCustomAgents() {
+  try {
+    const r = await fetch('/agents/custom');
+    customAgents = await r.json();
+    renderCustomAgentTabs();
+    for (const ca of customAgents) {
+      const r2 = await fetch(`/files/custom/${ca.id}`);
+      const d  = await r2.json();
+      if (d.content) renderCustomAgentOutput(ca.id, d.content);
+      connectCustomAgentStream(ca);
+    }
+  } catch {}
+}
+
+function renderCustomAgentTabs() {
+  // Remove old custom tabs and panes
+  document.querySelectorAll('[data-custom-tab]').forEach(el => el.remove());
+  document.querySelectorAll('[data-custom-pane]').forEach(el => el.remove());
+
+  const addBtn      = document.getElementById('addAgentBtn');
+  const tabBar      = document.getElementById('tabBar');
+  const rightCol    = document.querySelector('.col-right');
+
+  for (const ca of customAgents) {
+    // Tab button
+    const btn = document.createElement('button');
+    btn.className        = 'tab-btn';
+    btn.dataset.tab      = `custom-${ca.id}`;
+    btn.dataset.customTab = ca.id;
+    btn.innerHTML = `${esc(ca.name)}<span class="tab-close" title="Remove agent" onclick="event.stopPropagation();deleteCustomAgent('${ca.id}')">×</span>`;
+    btn.onclick   = () => switchTab(`custom-${ca.id}`, btn);
+    tabBar.insertBefore(btn, addBtn);
+
+    // Tab pane
+    const pane = document.createElement('div');
+    pane.className       = 'tab-pane col-body';
+    pane.id              = `tab-custom-${ca.id}`;
+    pane.dataset.customPane = ca.id;
+    pane.innerHTML       = `<div class="empty">⏳ Waiting for next agent dispatch…</div>`;
+    rightCol.appendChild(pane);
+  }
+}
+
+function connectCustomAgentStream(ca) {
+  const key = `custom-${ca.id}`;
+  if (_streams[key]) _streams[key].close();
+  const es = new EventSource(`/files/stream/custom/${ca.id}`);
+  es.onmessage = e => {
+    try { renderCustomAgentOutput(ca.id, JSON.parse(e.data).content); } catch {}
+  };
+  es.onerror = () => {
+    es.close();
+    delete _streams[key];
+    setTimeout(() => connectCustomAgentStream(ca), 2000);
+  };
+  _streams[key] = es;
+}
+
+function renderCustomAgentOutput(agentId, content) {
+  if (!content?.trim()) return;
+  const el = document.getElementById(`tab-custom-${agentId}`);
+  if (el) el.innerHTML = marked.parse(content);
+}
+
+async function deleteCustomAgent(agentId) {
+  if (!confirm('Remove this agent? Its definition will be deleted (output only clears on New Session).')) return;
+  if (_streams[`custom-${agentId}`]) {
+    _streams[`custom-${agentId}`].close();
+    delete _streams[`custom-${agentId}`];
+  }
+  const activePane = document.getElementById(`tab-custom-${agentId}`);
+  if (activePane?.classList.contains('active')) {
+    switchTab('actions', document.querySelector('[data-tab="actions"]'));
+  }
+  customAgents = customAgents.filter(ca => ca.id !== agentId);
+  await fetch(`/agents/custom/${agentId}`, { method: 'DELETE' });
+  renderCustomAgentTabs();
+  toast('Agent removed', 'ok');
+}
+
+// ── Add Agent modal ────────────────────────────────────────────────────────────
+function openAddAgentModal() {
+  document.getElementById('agentName').value   = '';
+  document.getElementById('agentPrompt').value = '';
+  document.getElementById('addAgentModal').classList.add('open');
+  setTimeout(() => document.getElementById('agentName').focus(), 50);
+}
+function closeAddAgentModal() {
+  document.getElementById('addAgentModal').classList.remove('open');
+}
+function closeModalOnOverlay(e) {
+  if (e.target === document.getElementById('addAgentModal')) closeAddAgentModal();
+}
+function fillAgentTemplate(key) {
+  const t = AGENT_TEMPLATES[key];
+  if (!t) return;
+  document.getElementById('agentName').value   = t.name;
+  document.getElementById('agentPrompt').value = t.prompt;
+}
+
+async function saveCustomAgent() {
+  const name   = document.getElementById('agentName').value.trim();
+  const prompt = document.getElementById('agentPrompt').value.trim();
+  if (!name)   { toast('Enter an agent name', 'error'); return; }
+  if (!prompt) { toast('Enter a prompt', 'error'); return; }
+
+  const btn = document.getElementById('saveAgentBtn');
+  btn.disabled    = true;
+  btn.textContent = 'Adding…';
+
+  try {
+    const res   = await fetch('/agents/custom', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ name, prompt }),
+    });
+    const agent = await res.json();
+
+    if (agent.error) {
+      toast(agent.error, 'error');
+    } else {
+      customAgents.push(agent);
+      renderCustomAgentTabs();
+      connectCustomAgentStream(agent);
+      const newBtn = document.querySelector(`[data-tab="custom-${agent.id}"]`);
+      if (newBtn) switchTab(`custom-${agent.id}`, newBtn);
+      closeAddAgentModal();
+      toast(`"${name}" agent added — runs on next dispatch`, 'ok');
+    }
+  } catch (e) {
+    toast(String(e), 'error');
   }
 
-  // Load existing actions
-  try {
-    const r = await fetch('/actions');
-    actions = await r.json();
-    renderCards();
-  } catch {}
+  btn.disabled    = false;
+  btn.textContent = 'Add Agent';
+}
 
-  // Check if already recording (e.g. started externally)
-  await pollStatus();
-  if (isRecording) connectFileStreams();
+// ── Boot ───────────────────────────────────────────────────────────────────────
+(async () => {
+  // Parallel: load all existing content + status at once
+  const [txR, notesR, qaR, sketchR, actionsR, statusR] = await Promise.allSettled([
+    fetch('/files/transcript').then(r => r.json()),
+    fetch('/files/notes').then(r => r.json()),
+    fetch('/files/qa').then(r => r.json()),
+    fetch('/files/sketch').then(r => r.json()),
+    fetch('/actions').then(r => r.json()),
+    fetch('/control/status').then(r => r.json()),
+  ]);
 
-  // Start background polling + actions stream
+  if (txR.status     === 'fulfilled' && txR.value.content)     renderTranscript(txR.value.content);
+  if (notesR.status  === 'fulfilled' && notesR.value.content)  renderNotes(notesR.value.content);
+  if (qaR.status     === 'fulfilled' && qaR.value.content)     renderQA(qaR.value.content);
+  if (sketchR.status === 'fulfilled' && sketchR.value.content) renderSketch(sketchR.value.content);
+  if (actionsR.status === 'fulfilled') { actions = actionsR.value; renderCards(); }
+
+  if (statusR.status === 'fulfilled') {
+    isRecording = statusR.value.running;
+    if (isRecording) {
+      elapsedSecs = statusR.value.elapsed || 0;
+      updateElapsed();
+      startElapsedTimer();
+      updateRecordingUI();
+      connectFileStreams();
+    }
+  }
+
+  // Start background polling + actions stream + custom agents
   startPolling();
   connectActionsStream();
+  await loadCustomAgents();
 })();
 </script>
 </body>

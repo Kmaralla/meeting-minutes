@@ -1,40 +1,91 @@
+<div align="center">
+
 # meeting-minutes
 
-A live meeting assistant that listens to your mic, transcribes speech in real time, and runs multiple AI agents in parallel to produce structured notes, action items, Q&A answers, and diagrams — all visible in a live web UI.
+**A local AI meeting assistant that listens, transcribes, and thinks in real time.**
 
-When the meeting ends, send a summary straight to Slack.
+Your mic → Whisper (local STT) → five Claude agents running in parallel → live notes, action items, Q&A answers, diagrams, and custom agents — all in a browser tab. Nothing leaves your machine except the Claude API calls.
+
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.110%2B-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![Whisper](https://img.shields.io/badge/Whisper-faster--whisper-orange)](https://github.com/SYSTRAN/faster-whisper)
+[![Claude](https://img.shields.io/badge/Claude-Code%20CLI-blueviolet?logo=anthropic&logoColor=white)](https://claude.ai/code)
+[![License](https://img.shields.io/badge/License-MIT-green)](#license)
+
+</div>
+
+---
+
+## What it does
+
+Start recording. Talk. The transcript appears word-by-word as you speak. Every few minutes — automatically, without you clicking anything — five AI agents read the transcript and update their panels live:
+
+| Agent | What you see |
+|---|---|
+| **Note-taker** | Running summary, key points, decisions, open questions |
+| **Action extractor** | Tasks as cards — tagged email / calendar / Notion / research, with one-click execute |
+| **Q&A agent** | Every question asked in the meeting, answered in real time |
+| **Sketch artist** | Mermaid diagrams auto-generated for any system, workflow, or process discussed |
+| **Transcriber** | Clean, timestamped, filler-word-free transcript |
+
+You can also add **custom agents** from the UI — write any prompt and get a dedicated live-updating tab. Sales coaching, risk analysis, technical review — whatever your meeting needs.
+
+When you're done: one click sends a summary + action items to Slack.
 
 ---
 
 ## How it works
 
 ```
-Mic → Whisper (local STT) → 5 Claude agents (parallel)
-         ├── Transcriber       → clean timestamped transcript
-         ├── Note-taker        → structured meeting notes
-         ├── Sketch artist     → Mermaid diagrams
-         ├── Q&A agent         → answers every question asked
-         └── Action extractor  → email / calendar / Notion / research items
-                                         ↓
-                              Web UI  (live updates)
-                                         ↓
-                              Slack DM  (on demand)
+Microphone
+    │
+    ▼
+faster-whisper (local, offline)
+    │  transcribes each speech segment (~2s chunks)
+    ▼
+transcription.md  ◄─── written immediately, UI updates live
+    │
+    │  every ~5 new chunks (auto) or "Generate Notes" (manual)
+    ▼
+┌─────────────────────────────────────────────────┐
+│  5 built-in agents  +  N custom agents          │
+│  all running in parallel via Claude Code CLI    │
+│                                                 │
+│  note-taker · action-extractor · Q&A agent      │
+│  sketch-artist · transcriber · [your agents]    │
+└─────────────────────────────────────────────────┘
+    │
+    ▼
+Output files (~/Desktop/meeting-output/)
+    │
+    ▼
+FastAPI SSE → Browser (live updates every 0.5s)
+    │
+    ▼
+Slack webhook (on "End Meeting")
 ```
 
-Agents only run when **you** press **Run Agents** — no background polling, no surprise API calls.
+Key design decisions:
+- **All audio processing is local** — faster-whisper runs on CPU, no audio sent anywhere
+- **Agents auto-dispatch** — every ~5 speech chunks (~2-3 min of talking), no button needed
+- **Custom agents persist** — defined once in `~/.config/meetingnotes/`, run every dispatch
+- **No build step** — vanilla JS frontend, single HTML file
 
 ---
 
-## Requirements
+## Prerequisites
 
-- Python 3.10+
-- [Claude Code CLI](https://claude.ai/code) installed and authenticated (`claude` on your PATH)
-- A microphone
+| Requirement | Notes |
+|---|---|
+| **Python 3.10+** | `python3 --version` to check |
+| **Claude Code CLI** | Install at [claude.ai/code](https://claude.ai/code) — run `claude --version` to verify |
+| **A microphone** | Built-in or external, any OS mic works |
+| **macOS or Linux** | Windows works but `sounddevice` setup may vary |
 
-Optional integrations (can be skipped on first run):
-- Slack incoming webhook — for end-of-meeting summaries
-- Notion API token — to push action items into a database
-- Google OAuth credentials — to create calendar events
+Claude Code must be **authenticated** before starting:
+```bash
+claude  # opens browser auth if not logged in
+```
 
 ---
 
@@ -45,117 +96,146 @@ Optional integrations (can be skipped on first run):
 git clone https://github.com/Kmaralla/meeting-minutes
 cd meeting-minutes
 
-# 2. Create virtual environment and install deps
+# 2. Create virtual environment
 python3 -m venv meetingenv
-source meetingenv/bin/activate
+source meetingenv/bin/activate      # Windows: meetingenv\Scripts\activate
+
+# 3. Install dependencies
 pip install -r requirements.txt
 
-# 3. Configure (copy and edit)
+# 4. (Optional) Configure integrations — Slack, Notion, Google Calendar
 cp .env.example .env
-# Fill in any integrations you want — all optional except Claude CLI
+# Edit .env with your keys — all optional, can be skipped
 
-# 4. Start the server
+# 5. Start
 ./run.sh --server
-# Opens http://localhost:8000 in your browser
+# Opens http://localhost:8000
 ```
+
+First run downloads the Whisper `base` model (~74 MB) — takes about 30 seconds.
 
 ---
 
 ## Usage
 
 1. Open **http://localhost:8000**
-2. Type a meeting name in the header
-3. Click **Start** — the mic goes live
-4. Talk. The assistant listens.
-5. Click **Run Agents** whenever you want notes generated (or wait for a natural pause)
-6. When done, click **End Meeting** → paste your Slack webhook → **Send to Slack**
-7. Click **New Session** to clear everything and start fresh for the next meeting
+2. Type a meeting name (optional)
+3. Click **Start Recording** — mic goes live, transcript appears as you speak
+4. Talk normally — agents auto-run every few minutes and update all panels
+5. Click **Generate Notes** any time to force an immediate agent run
+6. Click **End Meeting** when done — agents do a final pass, then send to Slack
+7. Click **New Session** to clear everything for the next meeting
+
+### Adding a custom agent
+
+Click **+ Agent** in the tab bar → give it a name and a prompt → **Add Agent**.
+
+Three quick-start templates are built in:
+- **Sales Coach** — objection handling, buying signals, next questions to ask
+- **Tech Reviewer** — architectural risks, unclear requirements, trade-offs
+- **Risk Analyst** — live risk register with high/medium/low ratings
+
+Your agent runs automatically on every dispatch alongside the built-in five. Its definition is saved to `~/.config/meetingnotes/` and persists across sessions.
 
 ---
 
 ## Configuration
 
-All config is via environment variables. Copy `.env.example` to `.env` and fill in what you need:
+Copy `.env.example` to `.env`. All variables are optional:
 
 ```bash
-# Required for Slack summaries
-SLACK_WEBHOOK_URL=https://hooks.slack.com/services/xxx/yyy/zzz
+# Slack — send meeting summary + actions at the end
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/T.../B.../...
 
-# Required for Notion action items
-NOTION_TOKEN=secret_xxx
-NOTION_DATABASE_ID=xxx
+# Notion — push action items into a database
+NOTION_TOKEN=secret_...
+NOTION_DATABASE_ID=...
 
-# Required for Google Calendar events
+# Google Calendar — create calendar events from action items
 GOOGLE_CREDENTIALS_FILE=~/.config/google/meeting-credentials.json
 GOOGLE_TOKEN_FILE=~/.config/google/meeting-token.json
 GOOGLE_CALENDAR_TZ=America/New_York
+
+# Whisper model (default: base)
+# WHISPER_MODEL=base
 ```
 
-### Getting a Slack webhook
+### Slack webhook
 
-1. Go to [api.slack.com/apps](https://api.slack.com/apps) → Create App → From Scratch
-2. Add feature: **Incoming Webhooks** → Activate
-3. Click **Add New Webhook to Workspace** → pick a channel or DM
-4. Copy the webhook URL into your `.env`
+1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create App** → From Scratch
+2. **Incoming Webhooks** → toggle on → **Add New Webhook to Workspace**
+3. Choose a channel or DM → copy the URL into `.env`
 
-### Getting Notion credentials
+### Notion
 
-1. Go to [notion.so/my-integrations](https://www.notion.so/my-integrations) → New integration
-2. Copy the **Internal Integration Token** as `NOTION_TOKEN`
-3. Open the database you want to use → Share → Invite your integration
-4. Copy the database ID from the URL (the long hex string) as `NOTION_DATABASE_ID`
+1. Go to [notion.so/my-integrations](https://www.notion.so/my-integrations) → **New integration** → copy the token
+2. Open your target database → **Share** → invite your integration
+3. Copy the database ID from the URL (the long hex after the workspace slug)
 
-### Getting Google Calendar credentials
+### Google Calendar
 
-1. Go to [console.cloud.google.com](https://console.cloud.google.com)
-2. Create a project → Enable **Google Calendar API**
-3. Create OAuth 2.0 credentials (Desktop app) → Download JSON
-4. Save as `~/.config/google/meeting-credentials.json`
-5. First run will open a browser to authenticate
+1. [console.cloud.google.com](https://console.cloud.google.com) → new project → enable **Google Calendar API**
+2. **Credentials** → Create → **OAuth 2.0 Client ID** → Desktop app → download JSON
+3. Save the file to `~/.config/google/meeting-credentials.json`
+4. First use opens a browser tab to complete OAuth — token is saved automatically
 
 ---
 
-## Run modes
+## Whisper model sizes
+
+Default is `base` — fast and accurate enough for most meetings. Pass `--model` to `run.sh` to change:
 
 ```bash
-./run.sh              # CLI mode — mic recording, press Enter to run agents
-./run.sh --server     # Web UI mode (recommended)
-./run.sh --stop       # Stop a running session
-./run.sh --status     # Check if a session is running
-./run.sh --dispatch-only  # Re-run agents on the last saved transcript
+./run.sh --server --model small    # better with accents / technical terms
+./run.sh --server --model medium   # near human-level accuracy, slower
+```
+
+| Model | Size | Speed | Best for |
+|---|---|---|---|
+| `tiny` | 39 MB | Fastest | Quick tests |
+| `base` | 74 MB | Fast | **Default** — works well for most meetings |
+| `small` | 244 MB | Medium | Accents, technical vocabulary |
+| `medium` | 769 MB | Slow on CPU | Maximum accuracy |
+
+All models run fully offline. No audio leaves your machine.
+
+---
+
+## Server commands
+
+```bash
+# Start (recommended — opens browser UI)
+./run.sh --server
+
+# Stop (from another terminal)
+pkill -f "python.*server.py"
+
+# Restart
+pkill -f "python.*server.py" && sleep 1 && ./run.sh --server
+
+# If port 8000 is stuck in use
+lsof -ti :8000 | xargs kill -9 && sleep 1 && ./run.sh --server
+
+# Re-run agents on a saved transcript without the mic
+./run.sh --dispatch-only
 ```
 
 ---
 
 ## Output files
 
-All output is saved to `~/Desktop/meeting-output/` after each agent run:
+All written to `~/Desktop/meeting-output/` during a session:
 
 | File | Contents |
-|------|----------|
-| `transcription.md` | Timestamped raw transcript |
-| `meeting-notes.md` | Summary, key points, decisions, action items |
-| `sketch.md` | Mermaid diagrams of any systems or flows discussed |
-| `interview-answers.md` | Every question asked with an AI-generated answer |
-| `actions.json` | Structured action items for email / calendar / Notion / research |
+|---|---|
+| `transcription.md` | Live transcript — updates as you speak |
+| `meeting-notes.md` | Summary, key points, decisions, action items, open questions |
+| `sketch.md` | Mermaid diagrams for systems and workflows discussed |
+| `interview-answers.md` | Every question detected, with AI-generated answers |
+| `actions.json` | Structured action items (type, owner, deadline, context, status) |
+| `custom-{id}.md` | Output from each custom agent |
 
----
-
-## Whisper model size
-
-By default uses `base` (fast, ~74MB). Swap in `.env` or via CLI flag:
-
-```bash
-./run.sh --model small     # better accuracy, ~244MB
-./run.sh --model medium    # near human-level, ~769MB
-```
-
-| Model | Size | Speed | Accuracy |
-|-------|------|-------|----------|
-| tiny  | 39MB | fastest | basic |
-| base  | 74MB | fast | good |
-| small | 244MB | moderate | better |
-| medium | 769MB | slow | excellent |
+Custom agent definitions are stored separately at `~/.config/meetingnotes/custom_agents.json` and persist across sessions.
 
 ---
 
@@ -163,21 +243,88 @@ By default uses `base` (fast, ~74MB). Swap in `.env` or via CLI flag:
 
 ```
 meeting-minutes/
-├── meetingnotes.py   # Core pipeline: mic → Whisper → agents
-├── server.py         # FastAPI backend + process control
-├── run.sh            # Entry point (start / stop / status)
-├── config.py         # Env var loading
+├── meetingnotes.py       # Core pipeline: mic → Whisper → agents → files
+├── server.py             # FastAPI backend: process control, SSE, REST, custom agents
+├── config.py             # Env var loading + shared paths
+├── run.sh                # Entry point for all run modes
 ├── handlers/
-│   ├── calendar.py   # Google Calendar integration
-│   ├── email.py      # Email draft generation
-│   └── notion.py     # Notion database integration
+│   ├── calendar.py       # Google Calendar integration
+│   ├── email.py          # Email draft generation
+│   └── notion.py         # Notion database integration
 ├── ui/
-│   └── index.html    # Single-file web UI
+│   ├── index.html        # Single-file web UI — no framework, no build step
+│   ├── marked.min.js     # Markdown renderer (self-hosted)
+│   └── mermaid.min.js    # Diagram renderer (self-hosted)
+├── .env.example          # Configuration template
 └── requirements.txt
 ```
 
 ---
 
+## Troubleshooting
+
+**Nothing transcribed / mic not picking up**
+
+The default silence threshold may be too high for your mic. Check `session.log` in `~/Desktop/meeting-output/` — if you see `chunks 0` after speaking, lower the threshold in `meetingnotes.py`:
+```python
+SILENCE_THRESHOLD = 0.003  # try lower values if speech isn't detected
+```
+
+**`claude` not found**
+
+Make sure Claude Code CLI is installed and on your PATH:
+```bash
+which claude          # should print a path
+claude --version      # should print a version
+```
+If not found, install from [claude.ai/code](https://claude.ai/code) and re-open your terminal.
+
+**Port 8000 already in use**
+
+```bash
+lsof -ti :8000 | xargs kill -9
+./run.sh --server
+```
+
+**Agents run but output panels stay empty**
+
+Hard-refresh the browser (`Cmd+Shift+R` / `Ctrl+Shift+R`). If that doesn't help, check `session.log` for agent errors — usually a missing `claude` binary or API auth issue.
+
+**`faster-whisper` install fails**
+
+On some systems you need to install `ctranslate2` separately:
+```bash
+pip install ctranslate2 faster-whisper
+```
+
+---
+
+## Tech stack
+
+| Layer | Technology | Why |
+|---|---|---|
+| Speech-to-text | [faster-whisper](https://github.com/SYSTRAN/faster-whisper) | Runs fully local, CPU-friendly, no API key |
+| AI agents | [Claude Code CLI](https://claude.ai/code) | Invoked as subprocesses, parallel execution |
+| Backend | [FastAPI](https://fastapi.tiangolo.com/) + SSE | Lightweight, async, real-time streaming |
+| Frontend | Vanilla JS | Zero dependencies, no build step, single file |
+| Integrations | Slack, Notion, Google Calendar | Action execution from within the UI |
+
+---
+
+## Contributing
+
+PRs welcome. Things that would be great to add:
+
+- [ ] Speaker diarization (who said what)
+- [ ] Export to PDF / Notion page
+- [ ] Meeting templates (standup, interview, design review)
+- [ ] Multi-language support
+- [ ] Windows tested setup guide
+
+Open an issue first for anything large so we can align before you build.
+
+---
+
 ## License
 
-MIT
+MIT — use it, fork it, build on it.

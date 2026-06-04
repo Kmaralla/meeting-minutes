@@ -19,3 +19,5 @@ OUTPUT_DIR   = Path.home() / "Desktop" / "meeting-output"
 ACTIONS_FILE = OUTPUT_DIR / "actions.json"
 CLAUDE_BIN        = shutil.which("claude") or "claude"
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")
+
+CUSTOM_AGENTS_FILE = Path.home() / ".config" / "meetingnotes" / "custom_agents.json"

@@ -16,6 +16,7 @@ Usage:
 
 import os
 import sys
+import json
 import time
 import queue
 import shutil
@@ -35,8 +36,8 @@ SAMPLE_RATE       = 16_000   # Hz — Whisper requires 16 kHz mono
 BLOCK_SIZE        = 3_200    # frames per callback (~0.2 s)
 SILENCE_THRESHOLD = 0.005    # RMS energy below this = silence
 MIN_SPEECH_BLOCKS = 3        # ignore sounds shorter than ~0.6 s
-SILENCE_BLOCKS    = 10       # consecutive silence blocks before flush (~2 s)
-MAX_BUFFER_SECS   = 12       # force-flush if buffer grows beyond this
+SILENCE_BLOCKS    = 8        # consecutive silence blocks before flush (~1.6 s)
+MAX_BUFFER_SECS   = 8        # force-flush if buffer grows beyond this
 WHISPER_MODEL     = "base"   # tiny | base | small | medium | large-v3
 CLAUDE_BIN        = shutil.which("claude") or "claude"
 
@@ -44,7 +45,12 @@ CLAUDE_BIN        = shutil.which("claude") or "claude"
 AUTO_STOP_SILENCE_MINS = 5    # stop if no speech for this many minutes (0 = disabled)
 AUTO_STOP_MAX_MINS     = 120  # hard ceiling in minutes (0 = disabled)
 
-OUTPUT_DIR = Path.home() / "Desktop" / "meeting-output"
+# Auto-dispatch: run agents automatically as speech accumulates
+AUTO_DISPATCH_EVERY_CHUNKS = 5   # trigger after this many new transcribed chunks
+AUTO_DISPATCH_MIN_INTERVAL = 60  # minimum seconds between auto-dispatches
+
+OUTPUT_DIR         = Path.home() / "Desktop" / "meeting-output"
+CUSTOM_AGENTS_FILE = Path.home() / ".config" / "meetingnotes" / "custom_agents.json"
 
 FILES = {
     "transcriber":      OUTPUT_DIR / "transcription.md",
@@ -174,6 +180,9 @@ _chunks: list[str] = []   # accumulated transcript lines
 _running = True
 _last_speech_time = time.time()  # tracks silence for auto-stop
 _dispatch_requested = False      # set by keyboard thread or flag file
+_transcribe_q: queue.Queue = queue.Queue()  # audio chunks pending transcription
+_last_auto_dispatch_chunks = 0   # chunk count at last auto-dispatch
+_last_auto_dispatch_time   = 0.0  # timestamp of last auto-dispatch
 
 
 def _full_transcript() -> str:
@@ -184,6 +193,17 @@ def _full_transcript() -> str:
 def _append_chunk(text: str, timestamp: str) -> None:
     with _lock:
         _chunks.append(f"[{timestamp}] {text}")
+
+
+# ─── Custom agents ────────────────────────────────────────────────────────────
+
+def _load_custom_agents() -> list:
+    try:
+        if CUSTOM_AGENTS_FILE.exists():
+            return json.loads(CUSTOM_AGENTS_FILE.read_text())
+    except Exception:
+        pass
+    return []
 
 
 # ─── Agent execution ──────────────────────────────────────────────────────────
@@ -233,21 +253,59 @@ def _run_agent(name: str, transcript: str) -> tuple[str, bool, str]:
         return name, False, f"'{CLAUDE_BIN}' not found — is Claude Code installed?"
 
 
+def _run_custom_agent(agent: dict, transcript: str) -> tuple[str, bool, str]:
+    import re as _re
+    agent_id = agent["id"]
+    name     = agent["name"]
+    out_file = OUTPUT_DIR / f"custom-{agent_id}.md"
+    current  = out_file.read_text() if out_file.exists() else ""
+
+    full_prompt = (
+        f"{agent['prompt']}\n\n---\n\n"
+        f"CURRENT FILE CONTENT:\n{current}\n\n"
+        f"FULL MEETING TRANSCRIPT:\n{transcript}"
+    )
+    try:
+        proc = subprocess.run(
+            [CLAUDE_BIN, "-p", full_prompt, "--tools", ""],
+            capture_output=True, text=True, timeout=120, env={**os.environ},
+        )
+        if proc.returncode != 0 or not proc.stdout.strip():
+            return name, False, (proc.stderr or "no output").strip()[:200]
+        output = proc.stdout.strip()
+        fence_match = _re.search(r"```(?:markdown|json|)?\n([\s\S]*?)```", output)
+        if fence_match:
+            output = fence_match.group(1).strip()
+        elif output.startswith("```"):
+            lines  = output.splitlines()
+            output = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:]).strip()
+        out_file.write_text(output + "\n")
+        return name, True, ""
+    except subprocess.TimeoutExpired:
+        return name, False, "timed out after 120s"
+    except FileNotFoundError:
+        return name, False, f"'{CLAUDE_BIN}' not found"
+
+
 def dispatch(transcript: str) -> None:
     if not transcript.strip():
         return
-    ts = datetime.now().strftime("%H:%M:%S")
-    print(f"\n[{ts}] ⟳ Dispatching to {len(AGENT_PROMPTS)} agents in parallel...", flush=True)
+    custom = _load_custom_agents()
+    total  = len(AGENT_PROMPTS) + len(custom)
+    ts     = datetime.now().strftime("%H:%M:%S")
+    print(f"\n[{ts}] ⟳ Dispatching to {total} agents in parallel...", flush=True)
 
-    with ThreadPoolExecutor(max_workers=len(AGENT_PROMPTS)) as pool:
-        futures = {
-            pool.submit(_run_agent, name, transcript): name
-            for name in AGENT_PROMPTS
-        }
+    with ThreadPoolExecutor(max_workers=max(total, 1)) as pool:
+        futures: dict = {}
+        for name in AGENT_PROMPTS:
+            futures[pool.submit(_run_agent, name, transcript)] = name
+        for ca in custom:
+            futures[pool.submit(_run_custom_agent, ca, transcript)] = ca["name"]
+
         for fut in as_completed(futures):
             name, ok, err = fut.result()
-            icon = "✓" if ok else "✗"
-            detail = f" ({err})" if not ok else f" → {FILES[name]}"
+            icon   = "✓" if ok else "✗"
+            detail = f" ({err})" if not ok else ""
             print(f"  {icon} {name}{detail}", flush=True)
 
     print(flush=True)
@@ -294,6 +352,48 @@ def _keyboard_listener() -> None:
             break
 
 
+def _write_raw_transcript() -> None:
+    """Flush current chunks to transcription.md immediately so the UI shows live text."""
+    try:
+        with _lock:
+            lines = list(_chunks)
+        FILES["transcriber"].write_text("\n\n".join(lines) + "\n")
+    except Exception:
+        pass
+
+
+def _maybe_auto_dispatch() -> None:
+    """Fire agents automatically after enough new speech chunks accumulate."""
+    global _last_auto_dispatch_chunks, _last_auto_dispatch_time
+    with _lock:
+        current = len(_chunks)
+    new_chunks = current - _last_auto_dispatch_chunks
+    time_since = time.time() - _last_auto_dispatch_time
+    if new_chunks >= AUTO_DISPATCH_EVERY_CHUNKS and time_since >= AUTO_DISPATCH_MIN_INTERVAL:
+        _last_auto_dispatch_chunks = current
+        _last_auto_dispatch_time   = time.time()
+        transcript = _full_transcript()
+        threading.Thread(target=dispatch, args=(transcript,), daemon=True).start()
+        print(f"  [auto] Dispatching after {new_chunks} new chunks...", flush=True)
+
+
+def _transcription_worker(model) -> None:
+    """Background thread: drains _transcribe_q so the audio loop never blocks."""
+    global _running
+    while _running:
+        try:
+            arr, ts = _transcribe_q.get(timeout=0.5)
+        except queue.Empty:
+            continue
+        text = _transcribe_audio(model, arr)
+        if text:
+            _append_chunk(text, ts)
+            _write_raw_transcript()   # live update — UI sees it within ~0.5s
+            _maybe_auto_dispatch()    # auto-run agents every N chunks
+            print(f"  ▶ [{ts}] {text}", flush=True)
+        _transcribe_q.task_done()
+
+
 def record_loop(model, max_minutes: int, silence_minutes: int) -> None:
     global _running, _last_speech_time, _dispatch_requested
     try:
@@ -322,6 +422,7 @@ def record_loop(model, max_minutes: int, silence_minutes: int) -> None:
     print(f"Mic active — {', '.join(stop_lines)}. Ctrl+C to stop.\n", flush=True)
 
     threading.Thread(target=_keyboard_listener, daemon=True).start()
+    threading.Thread(target=_transcription_worker, args=(model,), daemon=True).start()
 
     with sd.InputStream(
         samplerate=SAMPLE_RATE, channels=1, dtype="float32",
@@ -370,12 +471,8 @@ def record_loop(model, max_minutes: int, silence_minutes: int) -> None:
                 audio_buf.clear()
                 speech_blocks = 0
                 silence_blocks = 0
-
-                text = _transcribe_audio(model, arr)
-                if text:
-                    ts = datetime.now().strftime("%H:%M")
-                    _append_chunk(text, ts)
-                    print(f"  ▶ [{ts}] {text}", flush=True)
+                ts = datetime.now().strftime("%H:%M")
+                _transcribe_q.put((arr, ts))
 
             if now - status_at >= 10:
                 _print_status(session_start, hard_stop, silence_minutes)
@@ -444,13 +541,10 @@ def main() -> None:
     PID_FILE.write_text(str(os.getpid()))
     session_ts = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    for name, path in FILES.items():
-        if not path.exists():
-            if name == "action-extractor":
-                path.write_text("[]\n")
-            else:
-                title = name.replace("-", " ").title()
-                path.write_text(f"# {title}\n_Session started: {session_ts}_\n\n")
+    # Only pre-create the actions file (empty array); other files are written on first
+    # transcription / dispatch so the UI doesn't show stale placeholder text.
+    if not FILES["action-extractor"].exists():
+        FILES["action-extractor"].write_text("[]\n")
 
     print("=" * 60)
     print("  Meeting Notes — Live Assistant")
@@ -481,6 +575,8 @@ def main() -> None:
         record_loop(model, args.max_minutes, args.silence_stop)
     finally:
         PID_FILE.unlink(missing_ok=True)
+        # Wait for any in-flight transcriptions to finish before final dispatch
+        _transcribe_q.join()
         # Final dispatch with everything accumulated
         final = _full_transcript()
         if final:

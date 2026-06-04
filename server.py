@@ -13,6 +13,7 @@ import signal as _signal
 import subprocess
 import sys
 import time
+import uuid
 import urllib.request as _urllib
 from pathlib import Path
 from typing import AsyncGenerator
@@ -23,7 +24,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 
 from config import (
     ACTIONS_FILE, CLAUDE_BIN, OUTPUT_DIR,
-    SLACK_WEBHOOK_URL,
+    SLACK_WEBHOOK_URL, CUSTOM_AGENTS_FILE,
 )
 from handlers import calendar as cal_handler
 from handlers import email as email_handler
@@ -109,6 +110,8 @@ async def control_new_session():
             path.unlink()
     if ACTIONS_FILE.exists():
         ACTIONS_FILE.unlink()
+    for ca in _load_custom_agents():
+        (OUTPUT_DIR / f"custom-{ca['id']}.md").unlink(missing_ok=True)
     return {"ok": True}
 
 
@@ -124,6 +127,8 @@ async def control_start():
             path.unlink()
     if ACTIONS_FILE.exists():
         ACTIONS_FILE.unlink()
+    for ca in _load_custom_agents():
+        (OUTPUT_DIR / f"custom-{ca['id']}.md").unlink(missing_ok=True)
     log_file = open(OUTPUT_DIR / "session.log", "w")
     _proc = subprocess.Popen(
         [PYTHON_BIN, str(MEETINGNOTES_PY)],
@@ -182,7 +187,7 @@ async def _stream_file(name: str) -> AsyncGenerator[str, None]:
                     yield f"data: {json.dumps({'content': content})}\n\n"
         except Exception:
             pass
-        await asyncio.sleep(2)
+        await asyncio.sleep(0.5)
 
 
 @app.get("/files/stream/{name}")
@@ -202,6 +207,79 @@ async def files_get(name: str):
     if not path or not path.exists():
         return JSONResponse({"content": ""})
     return JSONResponse({"content": path.read_text()})
+
+
+# ── Custom agents ─────────────────────────────────────────────────────────────
+
+def _load_custom_agents() -> list:
+    try:
+        if CUSTOM_AGENTS_FILE.exists():
+            return json.loads(CUSTOM_AGENTS_FILE.read_text())
+    except Exception:
+        pass
+    return []
+
+def _save_custom_agents(agents: list) -> None:
+    CUSTOM_AGENTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    CUSTOM_AGENTS_FILE.write_text(json.dumps(agents, indent=2))
+
+@app.get("/agents/custom")
+async def get_custom_agents():
+    return JSONResponse(_load_custom_agents())
+
+@app.post("/agents/custom")
+async def create_custom_agent(request: Request):
+    body   = await request.json()
+    name   = body.get("name", "").strip()
+    prompt = body.get("prompt", "").strip()
+    if not name or not prompt:
+        return JSONResponse({"error": "name and prompt are required"}, status_code=400)
+    if len(_load_custom_agents()) >= 8:
+        return JSONResponse({"error": "Maximum 8 custom agents reached"}, status_code=400)
+    agent = {
+        "id":         f"ca_{uuid.uuid4().hex[:8]}",
+        "name":       name,
+        "prompt":     prompt,
+        "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+    }
+    agents = _load_custom_agents()
+    agents.append(agent)
+    _save_custom_agents(agents)
+    return JSONResponse(agent)
+
+@app.delete("/agents/custom/{agent_id}")
+async def delete_custom_agent(agent_id: str):
+    agents = [a for a in _load_custom_agents() if a["id"] != agent_id]
+    _save_custom_agents(agents)
+    (OUTPUT_DIR / f"custom-{agent_id}.md").unlink(missing_ok=True)
+    return {"ok": True}
+
+async def _stream_custom_agent_file(agent_id: str) -> AsyncGenerator[str, None]:
+    path = OUTPUT_DIR / f"custom-{agent_id}.md"
+    last_content = None
+    while True:
+        try:
+            if path.exists():
+                content = path.read_text()
+                if content != last_content:
+                    last_content = content
+                    yield f"data: {json.dumps({'content': content})}\n\n"
+        except Exception:
+            pass
+        await asyncio.sleep(0.5)
+
+@app.get("/files/stream/custom/{agent_id}")
+async def stream_custom_agent_file(agent_id: str):
+    return StreamingResponse(
+        _stream_custom_agent_file(agent_id),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+@app.get("/files/custom/{agent_id}")
+async def get_custom_agent_file(agent_id: str):
+    path = OUTPUT_DIR / f"custom-{agent_id}.md"
+    return JSONResponse({"content": path.read_text() if path.exists() else ""})
 
 
 # ── Actions REST ───────────────────────────────────────────────────────────────
@@ -227,7 +305,7 @@ async def _stream_actions() -> AsyncGenerator[str, None]:
                     yield f"data: {content}\n\n"
             except Exception:
                 pass
-        await asyncio.sleep(2)
+        await asyncio.sleep(0.5)
 
 
 @app.get("/actions/stream")
@@ -354,7 +432,9 @@ async def slack_send(request: Request):
     body        = await request.json()
     webhook_url = body.get("webhook_url", "").strip() or SLACK_WEBHOOK_URL
     if not webhook_url:
-        return JSONResponse({"error": "No Slack webhook URL provided"}, status_code=400)
+        return JSONResponse({"error": "No Slack webhook URL — paste one from api.slack.com/apps → Incoming Webhooks"}, status_code=400)
+    if not webhook_url.startswith("https://hooks.slack.com/"):
+        return JSONResponse({"error": f"URL doesn't look like a Slack webhook — should start with https://hooks.slack.com/services/..."}, status_code=400)
 
     meeting_name = body.get("meeting_name", "")
     notes_text   = (OUTPUT_DIR / "meeting-notes.md").read_text() if (OUTPUT_DIR / "meeting-notes.md").exists() else ""
@@ -364,14 +444,26 @@ async def slack_send(request: Request):
     def _post():
         data = json.dumps({"text": message}).encode()
         req  = _urllib.Request(webhook_url, data=data, headers={"Content-Type": "application/json"})
-        _urllib.urlopen(req, timeout=10)
+        resp = _urllib.urlopen(req, timeout=10)
+        return resp.read().decode()
 
     loop = asyncio.get_event_loop()
     try:
-        await loop.run_in_executor(None, _post)
-        return {"ok": True}
+        result = await loop.run_in_executor(None, _post)
+        if result.strip() == "ok":
+            return {"ok": True}
+        return JSONResponse({"error": f"Slack returned unexpected response: {result[:200]}"}, status_code=500)
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        err = str(e)
+        if "404" in err:
+            msg = "Slack webhook not found (404) — the URL may be wrong or the app was removed. Go to api.slack.com/apps → your app → Incoming Webhooks to get a fresh URL."
+        elif "403" in err:
+            msg = "Slack webhook forbidden (403) — it may have been revoked. Regenerate it at api.slack.com/apps."
+        elif "No route" in err or "Connection" in err or "timeout" in err.lower():
+            msg = "Network error reaching Slack — check your internet connection."
+        else:
+            msg = f"Slack error: {err}"
+        return JSONResponse({"error": msg}, status_code=500)
 
 
 # ── Entry ──────────────────────────────────────────────────────────────────────
