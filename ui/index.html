@@ -905,7 +905,7 @@ async function triggerDispatch() {
   // Re-enable after enough time for agents to finish (~60s max, but allow re-trigger after 15s)
   _dispatchTimer = setTimeout(() => {
     btn.disabled = !isRecording;
-    btn.textContent = 'Run Agents';
+    btn.textContent = 'Generate Notes';
   }, 15000);
 }
 
@@ -989,7 +989,7 @@ function connectStream(name, handler) {
   es.onerror   = () => {
     es.close();
     delete _streams[name];
-    if (isRecording) setTimeout(() => connectStream(name, handler), 2000);
+    setTimeout(() => connectStream(name, handler), 2000);
   };
   _streams[name] = es;
 }
@@ -1381,15 +1381,23 @@ If nothing to flag yet, output: _No risks identified yet..._`
   }
 };
 
+function _fetchWithTimeout(url, ms = 8000) {
+  const ctl = new AbortController();
+  const tid = setTimeout(() => ctl.abort(), ms);
+  return fetch(url, { signal: ctl.signal }).finally(() => clearTimeout(tid));
+}
+
 async function loadCustomAgents() {
   try {
-    const r = await fetch('/agents/custom');
+    const r = await _fetchWithTimeout('/agents/custom');
     customAgents = await r.json();
     renderCustomAgentTabs();
     for (const ca of customAgents) {
-      const r2 = await fetch(`/files/custom/${ca.id}`);
-      const d  = await r2.json();
-      if (d.content) renderCustomAgentOutput(ca.id, d.content);
+      try {
+        const r2 = await _fetchWithTimeout(`/files/custom/${ca.id}`);
+        const d  = await r2.json();
+        if (d.content) renderCustomAgentOutput(ca.id, d.content);
+      } catch {}
       connectCustomAgentStream(ca);
     }
   } catch {}
@@ -1491,12 +1499,17 @@ async function saveCustomAgent() {
   btn.disabled    = true;
   btn.textContent = 'Adding…';
 
+  const ctl = new AbortController();
+  const tid = setTimeout(() => ctl.abort(), 15000);
+
   try {
     const res   = await fetch('/agents/custom', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ name, prompt }),
+      signal:  ctl.signal,
     });
+    clearTimeout(tid);
     const agent = await res.json();
 
     if (agent.error) {
@@ -1511,7 +1524,8 @@ async function saveCustomAgent() {
       toast(`"${name}" agent added — runs on next dispatch`, 'ok');
     }
   } catch (e) {
-    toast(String(e), 'error');
+    clearTimeout(tid);
+    toast(e.name === 'AbortError' ? 'Server took too long — is it running?' : String(e), 'error');
   }
 
   btn.disabled    = false;

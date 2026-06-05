@@ -43,7 +43,11 @@ case "$1" in
     fi
     ;;
   --server)
-    exec $PYTHON server.py
+    while true; do
+      $PYTHON server.py
+      echo "[meetingnotes] server exited — restarting in 2s..." >&2
+      sleep 2
+    done
     ;;
   --both)
     echo "Starting recorder + Actions UI..."
