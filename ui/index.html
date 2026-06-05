@@ -815,29 +815,36 @@ async function toggleRecording() {
     if (!isRecording) {
       const res = await fetch('/control/start', { method: 'POST' });
       const d   = await res.json();
-      if (!d.ok) { toast(d.error || 'Failed to start', 'error'); return; }
-      isRecording  = true;
-      _userStopped = false;
-      elapsedSecs  = 0;
-      startElapsedTimer();
-      updateRecordingUI();
-      connectFileStreams();
-      connectActionsStream();
-      toast('Recording started — mic is live');
+      if (!d.ok) {
+        toast(d.error || 'Failed to start', 'error');
+      } else {
+        isRecording  = true;
+        _userStopped = false;
+        elapsedSecs  = 0;
+        startElapsedTimer();
+        updateRecordingUI();
+        connectFileStreams();
+        connectActionsStream();
+        toast('Recording started — mic is live');
+      }
     } else {
       const res = await fetch('/control/stop', { method: 'POST' });
       const d   = await res.json();
-      if (!d.ok) { toast(d.error || 'Failed to stop', 'error'); return; }
-      isRecording  = false;
-      _userStopped = true;   // block poller from flipping back until process exits
-      stopElapsedTimer();
-      updateRecordingUI();
-      toast('Stopped — generating final notes (~60s)…');
+      if (!d.ok) {
+        toast(d.error || 'Failed to stop', 'error');
+      } else {
+        isRecording  = false;
+        _userStopped = true;
+        stopElapsedTimer();
+        updateRecordingUI();
+        toast('Stopped — generating final notes (~60s)…');
+      }
     }
   } catch (e) {
     toast('Error: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
   }
-  btn.disabled = false;
 }
 
 function updateRecordingUI() {
@@ -1455,18 +1462,24 @@ function renderCustomAgentOutput(agentId, content) {
 
 async function deleteCustomAgent(agentId) {
   if (!confirm('Remove this agent? Its definition will be deleted (output only clears on New Session).')) return;
-  if (_streams[`custom-${agentId}`]) {
-    _streams[`custom-${agentId}`].close();
-    delete _streams[`custom-${agentId}`];
+  try {
+    if (_streams[`custom-${agentId}`]) {
+      _streams[`custom-${agentId}`].close();
+      delete _streams[`custom-${agentId}`];
+    }
+    const activePane = document.getElementById(`tab-custom-${agentId}`);
+    if (activePane?.classList.contains('active')) {
+      switchTab('actions', document.querySelector('[data-tab="actions"]'));
+    }
+    // Update UI immediately so the tab disappears right away
+    customAgents = customAgents.filter(ca => ca.id !== agentId);
+    renderCustomAgentTabs();
+    toast('Agent removed', 'ok');
+    // Persist deletion to server (non-blocking — UI already updated)
+    await fetch(`/agents/custom/${agentId}`, { method: 'DELETE' });
+  } catch (e) {
+    toast('Error removing agent: ' + e.message, 'error');
   }
-  const activePane = document.getElementById(`tab-custom-${agentId}`);
-  if (activePane?.classList.contains('active')) {
-    switchTab('actions', document.querySelector('[data-tab="actions"]'));
-  }
-  customAgents = customAgents.filter(ca => ca.id !== agentId);
-  await fetch(`/agents/custom/${agentId}`, { method: 'DELETE' });
-  renderCustomAgentTabs();
-  toast('Agent removed', 'ok');
 }
 
 // ── Add Agent modal ────────────────────────────────────────────────────────────

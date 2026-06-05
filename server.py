@@ -118,8 +118,19 @@ async def control_new_session():
 @app.post("/control/start")
 async def control_start():
     global _proc, _proc_start_time
+    # Check in-process handle first
     if _proc and _proc.poll() is None:
         return JSONResponse({"ok": False, "error": "already running"}, status_code=409)
+    # Also check PID file — catches a meetingnotes.py started by a previous server instance
+    if PID_FILE.exists():
+        try:
+            pid = int(PID_FILE.read_text().strip())
+            os.kill(pid, 0)   # raises if process is gone
+            return JSONResponse({"ok": False, "error": "already running (pid {})".format(pid)}, status_code=409)
+        except (ProcessLookupError, PermissionError):
+            PID_FILE.unlink(missing_ok=True)  # stale — clean up
+        except Exception:
+            pass
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     # Clear stale output files so UI shows fresh content
     for path in FILES_MAP.values():
