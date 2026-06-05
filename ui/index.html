@@ -943,12 +943,11 @@ async function newSession() {
 
   closeAllStreams();
   await fetch('/control/new-session', { method: 'POST' });
-  connectActionsStream();
-  // Reset custom agent pane content and reconnect streams
+  connectEventStream();
+  // Reset custom agent pane content
   for (const ca of customAgents) {
     const el = document.getElementById(`tab-custom-${ca.id}`);
     if (el) el.innerHTML = '<div class="empty">⏳ Waiting for next agent dispatch…</div>';
-    connectCustomAgentStream(ca);
   }
 
   // Reset UI state
@@ -970,32 +969,45 @@ async function newSession() {
   toast('Ready for new session', 'ok');
 }
 
-// ── File SSE streams ───────────────────────────────────────────────────────────
-const _streams = {};
+// ── Single multiplexed SSE stream ─────────────────────────────────────────────
+// One EventSource for everything: transcript, notes, Q&A, sketch, actions, and
+// all custom agents. Keeps us well under the browser's 6-connection-per-origin
+// HTTP/1.1 limit so fetch() calls (add agent, slack, etc.) are never queued.
+let _eventSource = null;
 
-function connectFileStreams() {
-  connectStream('transcript', data => renderTranscript(data.content));
-  connectStream('notes',      data => renderNotes(data.content));
-  connectStream('qa',         data => renderQA(data.content));
-  connectStream('sketch',     data => renderSketch(data.content));
+function connectEventStream() {
+  if (_eventSource) { try { _eventSource.close(); } catch {} }
+  const es = new EventSource('/events');
+  es.onmessage = e => {
+    try {
+      const msg = JSON.parse(e.data);
+      switch (msg.type) {
+        case 'transcript': if (msg.content) renderTranscript(msg.content); break;
+        case 'notes':      if (msg.content) renderNotes(msg.content);      break;
+        case 'qa':         if (msg.content) renderQA(msg.content);         break;
+        case 'sketch':     if (msg.content) renderSketch(msg.content);     break;
+        case 'actions':    actions = msg.data || []; renderCards();         break;
+        default:
+          if (msg.type?.startsWith('custom-') && msg.content)
+            renderCustomAgentOutput(msg.type.slice('custom-'.length), msg.content);
+      }
+    } catch {}
+  };
+  es.onerror = () => {
+    es.close();
+    _eventSource = null;
+    setTimeout(connectEventStream, 2000);
+  };
+  _eventSource = es;
 }
 
 function closeAllStreams() {
-  Object.values(_streams).forEach(es => { try { es.close(); } catch {} });
-  Object.keys(_streams).forEach(k => delete _streams[k]);
+  if (_eventSource) { try { _eventSource.close(); } catch {} _eventSource = null; }
 }
 
-function connectStream(name, handler) {
-  if (_streams[name]) { _streams[name].close(); }
-  const es = new EventSource(`/files/stream/${name}`);
-  es.onmessage = e => { try { handler(JSON.parse(e.data)); } catch {} };
-  es.onerror   = () => {
-    es.close();
-    delete _streams[name];
-    setTimeout(() => connectStream(name, handler), 2000);
-  };
-  _streams[name] = es;
-}
+// Kept as no-ops so existing call sites don't need updating
+function connectFileStreams()   {}
+function connectActionsStream() {}
 
 // ── Transcript renderer ────────────────────────────────────────────────────────
 function renderTranscript(content) {
@@ -1043,17 +1055,6 @@ async function renderSketch(content) {
       div.innerHTML = `<pre style="color:var(--red);font-size:11px">${esc(String(e))}</pre>`;
     }
   }
-}
-
-// ── Actions SSE ───────────────────────────────────────────────────────────────
-function connectActionsStream() {
-  if (_streams['_actions']) { _streams['_actions'].close(); }
-  const es = new EventSource('/actions/stream');
-  es.onmessage = e => {
-    try { actions = JSON.parse(e.data); renderCards(); } catch {}
-  };
-  es.onerror = () => { es.close(); delete _streams['_actions']; setTimeout(connectActionsStream, 2000); };
-  _streams['_actions'] = es;
 }
 
 // ── Cards renderer ─────────────────────────────────────────────────────────────
@@ -1441,20 +1442,8 @@ function renderCustomAgentTabs() {
   }
 }
 
-function connectCustomAgentStream(ca) {
-  const key = `custom-${ca.id}`;
-  if (_streams[key]) _streams[key].close();
-  const es = new EventSource(`/files/stream/custom/${ca.id}`);
-  es.onmessage = e => {
-    try { renderCustomAgentOutput(ca.id, JSON.parse(e.data).content); } catch {}
-  };
-  es.onerror = () => {
-    es.close();
-    delete _streams[key];
-    setTimeout(() => connectCustomAgentStream(ca), 2000);
-  };
-  _streams[key] = es;
-}
+// connectCustomAgentStream is a no-op — custom agent updates arrive via /events
+function connectCustomAgentStream(ca) {}
 
 function renderCustomAgentOutput(agentId, content) {
   if (!content?.trim()) return;
@@ -1465,10 +1454,6 @@ function renderCustomAgentOutput(agentId, content) {
 async function deleteCustomAgent(agentId) {
   if (!confirm('Remove this agent? Its definition will be deleted (output only clears on New Session).')) return;
   try {
-    if (_streams[`custom-${agentId}`]) {
-      _streams[`custom-${agentId}`].close();
-      delete _streams[`custom-${agentId}`];
-    }
     const activePane = document.getElementById(`tab-custom-${agentId}`);
     if (activePane?.classList.contains('active')) {
       switchTab('actions', document.querySelector('[data-tab="actions"]'));
@@ -1576,9 +1561,9 @@ async function saveCustomAgent() {
     }
   }
 
-  // Start background polling + actions stream + custom agents
+  // One SSE stream for everything, plus polling and custom agent tabs
+  connectEventStream();
   startPolling();
-  connectActionsStream();
   await loadCustomAgents();
 })();
 </script>

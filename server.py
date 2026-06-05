@@ -70,7 +70,10 @@ async def _force_kill_after(pid: int, delay: int = 90) -> None:
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
-    return UI_FILE.read_text()
+    return HTMLResponse(
+        content=UI_FILE.read_text(),
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get("/ui/{filename}")
@@ -195,35 +198,64 @@ async def control_dispatch():
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
-# ── File endpoints ─────────────────────────────────────────────────────────────
+# ── Multiplexed SSE — ONE connection for all panels ───────────────────────────
+# Replaces the 5-7 individual SSE streams that used to hit the browser's
+# HTTP/1.1 per-origin connection limit (6), causing fetch() requests to queue.
 
-async def _stream_file(name: str) -> AsyncGenerator[str, None]:
-    path = FILES_MAP.get(name)
-    if not path:
-        return
-    last_content = None
+async def _stream_all_events() -> AsyncGenerator[str, None]:
+    last: dict[str, str | None] = {name: None for name in FILES_MAP}
+    last["actions"] = None
+    custom_last: dict[str, str | None] = {}
+
     while True:
+        # Static files (transcript, notes, qa, sketch)
+        for name, path in FILES_MAP.items():
+            try:
+                if path.exists():
+                    content = path.read_text()
+                    if content != last[name]:
+                        last[name] = content
+                        yield f"data: {json.dumps({'type': name, 'content': content})}\n\n"
+            except Exception:
+                pass
+
+        # Actions file
         try:
-            if path.exists():
-                content = path.read_text()
-                if content != last_content:
-                    last_content = content
-                    yield f"data: {json.dumps({'content': content})}\n\n"
+            if ACTIONS_FILE.exists():
+                raw = ACTIONS_FILE.read_text()
+                if raw != last["actions"]:
+                    last["actions"] = raw
+                    data = json.loads(raw) if raw.strip() else []
+                    yield f"data: {json.dumps({'type': 'actions', 'data': data})}\n\n"
         except Exception:
             pass
+
+        # Custom agent files — picked up automatically as agents are added/removed
+        for ca in _load_custom_agents():
+            aid  = ca["id"]
+            path = OUTPUT_DIR / f"custom-{aid}.md"
+            try:
+                if path.exists():
+                    content = path.read_text()
+                    if content != custom_last.get(aid):
+                        custom_last[aid] = content
+                        yield f"data: {json.dumps({'type': f'custom-{aid}', 'content': content})}\n\n"
+            except Exception:
+                pass
+
         await asyncio.sleep(0.5)
 
 
-@app.get("/files/stream/{name}")
-async def files_stream(name: str):
-    if name not in FILES_MAP:
-        return JSONResponse({"error": "unknown file"}, status_code=404)
+@app.get("/events")
+async def events_stream():
     return StreamingResponse(
-        _stream_file(name),
+        _stream_all_events(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
+
+# ── File REST (kept for boot-time fetch) ──────────────────────────────────────
 
 @app.get("/files/{name}")
 async def files_get(name: str):
@@ -278,28 +310,6 @@ async def delete_custom_agent(agent_id: str):
     (OUTPUT_DIR / f"custom-{agent_id}.md").unlink(missing_ok=True)
     return {"ok": True}
 
-async def _stream_custom_agent_file(agent_id: str) -> AsyncGenerator[str, None]:
-    path = OUTPUT_DIR / f"custom-{agent_id}.md"
-    last_content = None
-    while True:
-        try:
-            if path.exists():
-                content = path.read_text()
-                if content != last_content:
-                    last_content = content
-                    yield f"data: {json.dumps({'content': content})}\n\n"
-        except Exception:
-            pass
-        await asyncio.sleep(0.5)
-
-@app.get("/files/stream/custom/{agent_id}")
-async def stream_custom_agent_file(agent_id: str):
-    return StreamingResponse(
-        _stream_custom_agent_file(agent_id),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
-
 @app.get("/files/custom/{agent_id}")
 async def get_custom_agent_file(agent_id: str):
     path = OUTPUT_DIR / f"custom-{agent_id}.md"
@@ -318,27 +328,6 @@ async def get_actions():
     return JSONResponse([])
 
 
-async def _stream_actions() -> AsyncGenerator[str, None]:
-    last = ""
-    while True:
-        if ACTIONS_FILE.exists():
-            try:
-                content = ACTIONS_FILE.read_text()
-                if content != last:
-                    last = content
-                    yield f"data: {content}\n\n"
-            except Exception:
-                pass
-        await asyncio.sleep(0.5)
-
-
-@app.get("/actions/stream")
-async def actions_stream():
-    return StreamingResponse(
-        _stream_actions(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
 
 
 @app.post("/actions/done")
