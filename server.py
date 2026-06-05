@@ -56,6 +56,16 @@ _proc:            subprocess.Popen | None = None
 _proc_start_time: float | None           = None
 
 
+async def _force_kill_after(pid: int, delay: int = 90) -> None:
+    """Send SIGKILL to pid after delay seconds if it's still alive."""
+    await asyncio.sleep(delay)
+    try:
+        os.kill(pid, _signal.SIGKILL)
+        print(f"[server] Force-killed PID {pid} after {delay}s timeout", flush=True)
+    except Exception:
+        pass
+
+
 # ── Pages ──────────────────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
@@ -157,12 +167,15 @@ async def control_start():
 async def control_stop():
     global _proc
     if _proc and _proc.poll() is None:
+        pid = _proc.pid
         _proc.send_signal(_signal.SIGINT)
+        asyncio.create_task(_force_kill_after(pid, delay=90))
         return {"ok": True}
     if PID_FILE.exists():
         try:
             pid = int(PID_FILE.read_text().strip())
             os.kill(pid, _signal.SIGINT)
+            asyncio.create_task(_force_kill_after(pid, delay=90))
             return {"ok": True}
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=404)

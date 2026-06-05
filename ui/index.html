@@ -696,7 +696,6 @@ body {
 
 <!-- ── Bottom bar ── -->
 <footer class="bottombar">
-  <button class="btn btn-danger" id="endBtn" onclick="endMeeting()" disabled>End Meeting</button>
   <div class="slack-group">
     <input id="slackWebhook" type="url" placeholder="Slack webhook URL (or set SLACK_WEBHOOK_URL env var)">
     <button class="btn btn-ghost" id="slackBtn" onclick="sendSlack()">📤 Send to Slack</button>
@@ -808,11 +807,15 @@ function updateElapsed() {
 }
 
 // ── Recording control ──────────────────────────────────────────────────────────
+let _stopTimeout = null;
+
 async function toggleRecording() {
   const btn = document.getElementById('startStopBtn');
-  btn.disabled = true;
-  try {
-    if (!isRecording) {
+
+  if (!isRecording) {
+    // ── Start ──────────────────────────────────────────────────
+    btn.disabled = true;
+    try {
       const res = await fetch('/control/start', { method: 'POST' });
       const d   = await res.json();
       if (!d.ok) {
@@ -827,23 +830,46 @@ async function toggleRecording() {
         connectActionsStream();
         toast('Recording started — mic is live');
       }
-    } else {
+    } catch (e) {
+      toast('Error: ' + e.message, 'error');
+    } finally {
+      btn.disabled = false;
+    }
+
+  } else {
+    // ── End Meeting ────────────────────────────────────────────
+    if (!confirm('End the meeting? Final notes will be generated (~60s) and you can send to Slack.')) return;
+    btn.disabled = true;
+    try {
       const res = await fetch('/control/stop', { method: 'POST' });
       const d   = await res.json();
       if (!d.ok) {
         toast(d.error || 'Failed to stop', 'error');
+        btn.disabled = false;
       } else {
         isRecording  = false;
         _userStopped = true;
         stopElapsedTimer();
         updateRecordingUI();
-        toast('Stopped — generating final notes (~60s)…');
+        toast('Meeting ended — generating final notes (~60s)…');
+        // Highlight Slack button
+        document.getElementById('slackBtn').classList.add('btn-primary');
+        document.getElementById('slackBtn').classList.remove('btn-ghost');
+        // Failsafe: if process never exits, reset UI after 120s
+        if (_stopTimeout) clearTimeout(_stopTimeout);
+        _stopTimeout = setTimeout(() => {
+          if (_userStopped) {
+            _userStopped = false;
+            isRecording  = false;
+            updateRecordingUI();
+            toast('Agents timed out — check session.log if notes seem incomplete', 'error');
+          }
+        }, 120000);
       }
+    } catch (e) {
+      toast('Error: ' + e.message, 'error');
+      btn.disabled = false;
     }
-  } catch (e) {
-    toast('Error: ' + e.message, 'error');
-  } finally {
-    btn.disabled = false;
   }
 }
 
@@ -852,26 +878,23 @@ function updateRecordingUI() {
   const label    = document.getElementById('statusLabel');
   const startBtn = document.getElementById('startStopBtn');
   const dispatch = document.getElementById('dispatchBtn');
-  const endBtn   = document.getElementById('endBtn');
+  const hint     = document.getElementById('transcriptHint');
 
-  const hint = document.getElementById('transcriptHint');
   if (isRecording) {
     dot.className        = 'dot live';
     label.textContent    = 'recording';
-    startBtn.textContent = 'Stop Recording';
+    startBtn.textContent = 'End Meeting';
     startBtn.className   = 'btn btn-danger';
+    startBtn.disabled    = false;
     dispatch.disabled    = false;
-    endBtn.disabled      = false;
-    endBtn.textContent   = 'End Meeting';
     if (hint) hint.style.display = '';
   } else if (_userStopped) {
-    dot.className        = 'dot live';   // keep dot pulsing — agents still running
+    dot.className        = 'dot live';   // keep pulsing — final agents still running
     label.textContent    = 'finalizing';
-    startBtn.textContent = 'Start Recording';
-    startBtn.className   = 'btn btn-start';
-    startBtn.disabled    = true;         // don't allow restart while finalizing
+    startBtn.textContent = 'Finalizing…';
+    startBtn.className   = 'btn btn-danger';
+    startBtn.disabled    = true;
     dispatch.disabled    = true;
-    endBtn.disabled      = true;
     if (hint) hint.style.display = 'none';
   } else {
     dot.className        = 'dot ended';
@@ -880,8 +903,6 @@ function updateRecordingUI() {
     startBtn.className   = 'btn btn-start';
     startBtn.disabled    = false;
     dispatch.disabled    = true;
-    endBtn.disabled      = true;
-    endBtn.textContent   = 'End Meeting';
     if (hint) hint.style.display = 'none';
   }
 }
@@ -947,31 +968,6 @@ async function newSession() {
   renderCards();
 
   toast('Ready for new session', 'ok');
-}
-
-// ── End Meeting ────────────────────────────────────────────────────────────────
-async function endMeeting() {
-  if (!confirm('End the meeting? Final notes will be generated (~60s) then you can send to Slack.')) return;
-
-  const endBtn = document.getElementById('endBtn');
-  endBtn.disabled    = true;
-  endBtn.textContent = 'Ending…';
-
-  try {
-    if (isRecording) {
-      await fetch('/control/stop', { method: 'POST' });
-      isRecording  = false;
-      _userStopped = true;
-      stopElapsedTimer();
-      updateRecordingUI();
-    }
-  } catch (e) {
-    toast('Error stopping: ' + e.message, 'error');
-  }
-
-  toast('Meeting ended — final notes generating now (~60s). Results update live.');
-  document.getElementById('slackBtn').classList.add('btn-primary');
-  document.getElementById('slackBtn').classList.remove('btn-ghost');
 }
 
 // ── File SSE streams ───────────────────────────────────────────────────────────
@@ -1240,12 +1236,15 @@ async function createCalEvent(actionId) {
   try {
     const res    = await fetch('/act/execute', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ type: 'calendar', data }) });
     const result = await res.json();
-    if (result.error) { toast(result.error, 'error'); btn.disabled = false; btn.textContent = 'Create Event'; return; }
-    document.getElementById('panelBody').innerHTML +=
-      `<div style="margin-top:12px"><div class="field-label">Created</div><a class="result-link" href="${result.link}" target="_blank">${result.link}</a></div>`;
-    markDone(actionId);
-    toast('Event created!', 'ok');
-  } catch (e) { toast(String(e), 'error'); btn.disabled = false; btn.textContent = 'Create Event'; }
+    if (result.error) { toast(result.error, 'error'); }
+    else {
+      document.getElementById('panelBody').innerHTML +=
+        `<div style="margin-top:12px"><div class="field-label">Created</div><a class="result-link" href="${result.link}" target="_blank">${result.link}</a></div>`;
+      markDone(actionId);
+      toast('Event created!', 'ok');
+    }
+  } catch (e) { toast(String(e), 'error'); }
+  finally { btn.disabled = false; btn.textContent = 'Create Event'; }
 }
 
 // ── Notion ─────────────────────────────────────────────────────────────────────
@@ -1261,12 +1260,15 @@ async function createNotionPage(actionId) {
   try {
     const res    = await fetch('/act/execute', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ type: 'notion', data }) });
     const result = await res.json();
-    if (result.error) { toast(result.error, 'error'); btn.disabled = false; btn.textContent = 'Add to Notion'; return; }
-    document.getElementById('panelBody').innerHTML +=
-      `<div style="margin-top:12px"><div class="field-label">Created</div><a class="result-link" href="${result.url}" target="_blank">${result.url}</a></div>`;
-    markDone(actionId);
-    toast('Added to Notion!', 'ok');
-  } catch (e) { toast(String(e), 'error'); btn.disabled = false; btn.textContent = 'Add to Notion'; }
+    if (result.error) { toast(result.error, 'error'); }
+    else {
+      document.getElementById('panelBody').innerHTML +=
+        `<div style="margin-top:12px"><div class="field-label">Created</div><a class="result-link" href="${result.url}" target="_blank">${result.url}</a></div>`;
+      markDone(actionId);
+      toast('Added to Notion!', 'ok');
+    }
+  } catch (e) { toast(String(e), 'error'); }
+  finally { btn.disabled = false; btn.textContent = 'Add to Notion'; }
 }
 
 // ── Email ──────────────────────────────────────────────────────────────────────

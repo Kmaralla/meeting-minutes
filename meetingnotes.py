@@ -178,6 +178,24 @@ DISPATCH_FILE = Path("/tmp/meetingnotes.dispatch")  # touch to trigger dispatch
 _lock = threading.Lock()
 _chunks: list[str] = []   # accumulated transcript lines
 _running = True
+
+
+def _timed_queue_join(q: queue.Queue, timeout: float = 25.0) -> None:
+    """queue.join() with a timeout so shutdown can never deadlock."""
+    done = threading.Event()
+    def _waiter():
+        q.join()
+        done.set()
+    threading.Thread(target=_waiter, daemon=True).start()
+    if not done.wait(timeout=timeout):
+        # Force-drain any items the worker never picked up
+        print(f"  [warn] Transcription queue drain timed out — discarding remaining items", flush=True)
+        while not q.empty():
+            try:
+                q.get_nowait()
+                q.task_done()
+            except queue.Empty:
+                break
 _last_speech_time = time.time()  # tracks silence for auto-stop
 _dispatch_requested = False      # set by keyboard thread or flag file
 _transcribe_q: queue.Queue = queue.Queue()  # audio chunks pending transcription
@@ -328,15 +346,24 @@ def _load_whisper(model_name: str = WHISPER_MODEL):
     return model
 
 
-def _transcribe_audio(model, audio: np.ndarray) -> str:
-    segs, _ = model.transcribe(
-        audio,
-        beam_size=3,
-        language="en",
-        vad_filter=True,
-        vad_parameters={"min_silence_duration_ms": 500},
-    )
-    return " ".join(s.text.strip() for s in segs).strip()
+def _transcribe_audio(model, audio: np.ndarray, timeout: float = 30.0) -> str:
+    """Transcribe one audio chunk. Returns empty string if Whisper hangs."""
+    result: list[str] = [""]
+    def _run():
+        segs, _ = model.transcribe(
+            audio,
+            beam_size=3,
+            language="en",
+            vad_filter=True,
+            vad_parameters={"min_silence_duration_ms": 500},
+        )
+        result[0] = " ".join(s.text.strip() for s in segs).strip()
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    t.join(timeout=timeout)
+    if t.is_alive():
+        print("  [warn] Whisper timed out on chunk — skipping", flush=True)
+    return result[0]
 
 
 # ─── Main recording loop ───────────────────────────────────────────────────────
@@ -378,12 +405,16 @@ def _maybe_auto_dispatch() -> None:
 
 
 def _transcription_worker(model) -> None:
-    """Background thread: drains _transcribe_q so the audio loop never blocks."""
+    """Background thread: drains _transcribe_q so the audio loop never blocks.
+    After _running becomes False, finishes any items already in the queue
+    so _transcribe_q.join() doesn't deadlock."""
     global _running
-    while _running:
+    while _running or not _transcribe_q.empty():
         try:
             arr, ts = _transcribe_q.get(timeout=0.5)
         except queue.Empty:
+            if not _running:
+                break   # queue empty and shutdown requested — we're done
             continue
         text = _transcribe_audio(model, arr)
         if text:
@@ -575,8 +606,8 @@ def main() -> None:
         record_loop(model, args.max_minutes, args.silence_stop)
     finally:
         PID_FILE.unlink(missing_ok=True)
-        # Wait for any in-flight transcriptions to finish before final dispatch
-        _transcribe_q.join()
+        # Wait for any in-flight transcriptions, but not forever
+        _timed_queue_join(_transcribe_q, timeout=25)
         # Final dispatch with everything accumulated
         final = _full_transcript()
         if final:
