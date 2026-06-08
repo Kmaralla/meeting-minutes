@@ -3,7 +3,7 @@
 meetingnotes.py — Live meeting assistant
 
 Architecture:
-  Mic → Whisper STT → Dispatcher → Claude agents (parallel)
+  Mic → Whisper STT → Dispatcher → AI agents (Claude or OpenAI, parallel)
       ├── transcriber     → output/transcription.md
       ├── note-taker      → output/meeting-notes.md
       ├── sketch-artist   → output/sketch.md  (Mermaid diagrams)
@@ -19,16 +19,17 @@ import sys
 import json
 import time
 import queue
-import shutil
 import signal
 import threading
-import subprocess
 import argparse
 from pathlib import Path
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
+
+from config import AGENT_STATUS_FILE
+from llm import LLMError, generate_text, provider_label
 
 # ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -39,14 +40,13 @@ MIN_SPEECH_BLOCKS = 3        # ignore sounds shorter than ~0.6 s
 SILENCE_BLOCKS    = 8        # consecutive silence blocks before flush (~1.6 s)
 MAX_BUFFER_SECS   = 8        # force-flush if buffer grows beyond this
 WHISPER_MODEL     = "base"   # tiny | base | small | medium | large-v3
-CLAUDE_BIN        = shutil.which("claude") or "claude"
 
 # Auto-stop controls
 AUTO_STOP_SILENCE_MINS = 5    # stop if no speech for this many minutes (0 = disabled)
 AUTO_STOP_MAX_MINS     = 120  # hard ceiling in minutes (0 = disabled)
 
 # Auto-dispatch: run agents automatically as speech accumulates
-AUTO_DISPATCH_EVERY_CHUNKS = 5   # trigger after this many new transcribed chunks
+AUTO_DISPATCH_EVERY_CHUNKS = 3   # trigger after this many new transcribed chunks
 AUTO_DISPATCH_MIN_INTERVAL = 60  # minimum seconds between auto-dispatches
 
 OUTPUT_DIR         = Path.home() / "Desktop" / "meeting-output"
@@ -73,7 +73,10 @@ Rules:
 - Add a [HH:MM] timestamp marker before each newly appended block
 - Clean up filler words (um, uh, like) but preserve all meaning
 - Format into natural paragraphs when there are natural pauses
-- Output ONLY the markdown document — no meta-commentary or wrapping""",
+- Output ONLY the markdown document — no meta-commentary or wrapping
+- If a speaker is introduced by name (e.g. "Hi I'm Alex" or "Alex mentioned..."), prefix their speech segment with "**Alex:**"
+- Format speaker turns as: **Name:** their words
+- If speakers are unknown, use **Speaker:** or no prefix""",
 
     "note-taker": """\
 You are a smart meeting note-taker maintaining a live structured summary.
@@ -99,24 +102,41 @@ Output the COMPLETE updated meeting-notes.md using exactly these sections:
 Keep all sections current based on the full transcript. Be concise and scannable.""",
 
     "sketch-artist": """\
-You are a technical diagram creator for live meetings.
-Analyze the full transcript and maintain a sketch.md with Mermaid diagrams.
+You are a meeting sketch artist for live meetings.
+Analyze the full transcript and maintain a sketch.md with an evolving visual overview.
 
-Create appropriate diagrams:
-- Processes or workflows described → flowchart LR or TD
-- System interactions, APIs, request flows → sequenceDiagram
-- Topic relationships or concept maps → mindmap
-- Data or class relationships → classDiagram or erDiagram
-- Timelines or project roadmaps → gantt
+ALWAYS start with a nested markdown outline — this powers the live interactive mindmap:
 
-Rules:
-- Use ```mermaid fenced code blocks, one per diagram, each with a ## heading
-- Replace or improve diagrams as your understanding of the content deepens
-- Only create diagrams where the transcript provides enough substance
-- If nothing diagram-worthy yet, output exactly:
+# [Meeting Topic or Title]
 
-# Sketches
-_Waiting for diagrammable content..._""",
+## [Key Theme 1]
+- Important point
+- Important point
+  - Sub-detail if needed
+
+## [Key Theme 2]
+- Important point
+
+Keep the outline concise and scannable — 2–5 bullets per section, 2–4 sections max.
+
+OPTIONALLY add Mermaid code blocks below the outline for genuine processes, flows, or sequences:
+
+```mermaid
+sequenceDiagram
+  ...
+```
+
+STRICT OUTPUT RULES — violations break the rendering:
+- Start with # (a heading). Zero words before it.
+- End with the last bullet or mermaid block. Zero words after it.
+- No "No updates", no "Sketch holds", no "Here is the current sketch", no status notes.
+- The nested markdown outline is mandatory and always comes first.
+- Mermaid diagrams are optional — only add them for genuine processes or flows.
+- Update as the meeting evolves.
+- If nothing notable yet, output exactly:
+
+# Meeting Sketch
+_Listening for meeting content..._""",
 
     "interview-agent": """\
 You are a real-time interview and Q&A assistant monitoring a meeting.
@@ -153,6 +173,7 @@ Each item must have these exact fields:
   "description": "clear, self-contained, actionable description",
   "owner":       "person who committed, or 'me' if unclear",
   "deadline":    "YYYY-MM-DD or empty string if not mentioned",
+  "priority":    "high" | "medium" | "low",
   "context":     "1-2 sentence excerpt from transcript that triggered this item",
   "status":      "pending"
 }
@@ -161,7 +182,12 @@ Type guide:
   email    — someone needs to send, share, or follow up in writing
   calendar — a meeting, sync, call, demo, or deadline to schedule
   notion   — a bug, ticket, task, feature, or work item to track
-  research — a topic to investigate, look into, or compare
+  research — a topic to investigate, look into, or compare (include specific comparison targets or metrics in context)
+
+Priority guide:
+  high   — blocking, urgent, time-sensitive (e.g. "needs to go out today", "before end of day")
+  medium — important but not blocking (e.g. "next week", "when you get a chance")
+  low    — nice-to-have, exploratory, or no deadline mentioned
 
 Rules:
 - If the CURRENT FILE contains existing items, preserve them (keep id and status unchanged).
@@ -237,16 +263,9 @@ def _run_agent(name: str, transcript: str) -> tuple[str, bool, str]:
     full_prompt = f"{system}\n\n---\n\n{user_msg}"
 
     try:
-        proc = subprocess.run(
-            [CLAUDE_BIN, "-p", full_prompt, "--tools", ""],
-            capture_output=True, text=True, timeout=120, env={**os.environ},
-        )
-        if proc.returncode != 0 or not proc.stdout.strip():
-            return name, False, (proc.stderr or "no output").strip()[:200]
+        output = generate_text(full_prompt, timeout=120)
 
-        output = proc.stdout.strip()
-
-        # Strip preamble prose and markdown code fences if agent wrapped its output
+        # Strip markdown code fences if agent wrapped its output
         import re as _re
         fence_match = _re.search(r"```(?:markdown|json|)?\n([\s\S]*?)```", output)
         if fence_match:
@@ -255,20 +274,70 @@ def _run_agent(name: str, transcript: str) -> tuple[str, bool, str]:
             lines = output.splitlines()
             output = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:]).strip()
 
-        # Validate JSON for the action-extractor; skip write if malformed
+        # Strip leading prose before the first # heading for markdown agents
+        if name != "action-extractor":
+            h = _re.search(r"^#", output, _re.MULTILINE)
+            if h and h.start() > 0:
+                output = output[h.start():]
+
+        # For sketch: also strip trailing prose/commentary after the last markdown content line
+        if name == "sketch-artist":
+            lines = output.splitlines()
+            while lines and not _re.match(r'^(#|-|\*|>|```|_|\s*$)', lines[-1].strip()):
+                lines.pop()
+            while lines and lines[-1].strip() in ('', '---', '===', '***'):
+                lines.pop()
+            output = '\n'.join(lines)
+
+        # Validate JSON for the action-extractor; merge done statuses; skip write if malformed
         if name == "action-extractor":
             try:
-                _json.loads(output)
+                new_items = _json.loads(output)
             except _json.JSONDecodeError as e:
                 return name, False, f"invalid JSON: {e}"
+            # Robust merge: preserve done statuses + deduplicate by description
+            if current.strip():
+                try:
+                    import re as _re2
+                    prev_items = _json.loads(current)
+
+                    def _norm(s: str) -> str:
+                        return _re2.sub(r'\W+', ' ', (s or '').lower()).strip()[:60]
+
+                    # Build lookup: normalized description → status from prev
+                    prev_by_desc = {_norm(a.get("description","")): a.get("status","pending")
+                                    for a in prev_items}
+                    prev_done_ids = {a["id"] for a in prev_items if a.get("status") == "done"}
+
+                    seen_descs: set[str] = set()
+                    deduped: list = []
+                    for a in new_items:
+                        nd = _norm(a.get("description",""))
+                        if nd in seen_descs:
+                            continue  # duplicate — skip
+                        seen_descs.add(nd)
+                        # Restore done status from prev by ID or description match
+                        if a.get("id") in prev_done_ids:
+                            a["status"] = "done"
+                        elif prev_by_desc.get(nd) == "done":
+                            a["status"] = "done"
+                        deduped.append(a)
+
+                    output = _json.dumps(deduped)
+                except Exception:
+                    pass
 
         out_file.write_text(output + "\n")
         return name, True, ""
 
-    except subprocess.TimeoutExpired:
-        return name, False, "timed out after 120 s"
-    except FileNotFoundError:
-        return name, False, f"'{CLAUDE_BIN}' not found — is Claude Code installed?"
+    except LLMError as e:
+        err = str(e)[:200]
+        if name != "action-extractor" and not current.strip():
+            out_file.write_text(
+                "# AI Agent Issue\n\n"
+                f"_{name} could not generate content yet: {err}_\n"
+            )
+        return name, False, err
 
 
 def _run_custom_agent(agent: dict, transcript: str) -> tuple[str, bool, str]:
@@ -284,48 +353,82 @@ def _run_custom_agent(agent: dict, transcript: str) -> tuple[str, bool, str]:
         f"FULL MEETING TRANSCRIPT:\n{transcript}"
     )
     try:
-        proc = subprocess.run(
-            [CLAUDE_BIN, "-p", full_prompt, "--tools", ""],
-            capture_output=True, text=True, timeout=120, env={**os.environ},
-        )
-        if proc.returncode != 0 or not proc.stdout.strip():
-            return name, False, (proc.stderr or "no output").strip()[:200]
-        output = proc.stdout.strip()
+        output = generate_text(full_prompt, timeout=120)
         fence_match = _re.search(r"```(?:markdown|json|)?\n([\s\S]*?)```", output)
         if fence_match:
             output = fence_match.group(1).strip()
         elif output.startswith("```"):
             lines  = output.splitlines()
             output = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:]).strip()
+        # Strip leading prose before the first # heading
+        h = _re.search(r"^#", output, _re.MULTILINE)
+        if h and h.start() > 0:
+            output = output[h.start():]
         out_file.write_text(output + "\n")
         return name, True, ""
-    except subprocess.TimeoutExpired:
-        return name, False, "timed out after 120s"
-    except FileNotFoundError:
-        return name, False, f"'{CLAUDE_BIN}' not found"
+    except LLMError as e:
+        err = str(e)[:200]
+        if not current.strip():
+            out_file.write_text(
+                "# AI Agent Issue\n\n"
+                f"_{name} could not generate content yet: {err}_\n"
+            )
+        return name, False, err
 
 
-def dispatch(transcript: str) -> None:
+
+
+def _write_agent_status(status: dict) -> None:
+    try:
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        AGENT_STATUS_FILE.write_text(json.dumps(status, indent=2) + "\n")
+    except Exception:
+        pass
+
+def dispatch(transcript: str, only_agent: str | None = None) -> None:
     if not transcript.strip():
         return
     custom = _load_custom_agents()
-    total  = len(AGENT_PROMPTS) + len(custom)
-    ts     = datetime.now().strftime("%H:%M:%S")
-    print(f"\n[{ts}] ⟳ Dispatching to {total} agents in parallel...", flush=True)
+    selected_builtin = [name for name in AGENT_PROMPTS if not only_agent or name == only_agent]
+    selected_custom = [ca for ca in custom if not only_agent or ca["name"] == only_agent or ca["id"] == only_agent]
+    total = len(selected_builtin) + len(selected_custom)
+    if total == 0:
+        print(f"  [warn] No matching agent: {only_agent}", flush=True)
+        return
+
+    ts = datetime.now().strftime("%H:%M:%S")
+    status = {
+        "provider": provider_label(),
+        "started_at": ts,
+        "running": True,
+        "agents": {name: {"state": "queued", "error": ""} for name in selected_builtin},
+    }
+    for ca in selected_custom:
+        status["agents"][ca["name"]] = {"state": "queued", "error": ""}
+    _write_agent_status(status)
+    print(f"\n[{ts}] ⟳ Dispatching to {total} agents via {provider_label()} in parallel...", flush=True)
 
     with ThreadPoolExecutor(max_workers=max(total, 1)) as pool:
         futures: dict = {}
-        for name in AGENT_PROMPTS:
+        for name in selected_builtin:
+            status["agents"][name] = {"state": "running", "error": ""}
             futures[pool.submit(_run_agent, name, transcript)] = name
-        for ca in custom:
+        for ca in selected_custom:
+            status["agents"][ca["name"]] = {"state": "running", "error": ""}
             futures[pool.submit(_run_custom_agent, ca, transcript)] = ca["name"]
+        _write_agent_status(status)
 
         for fut in as_completed(futures):
             name, ok, err = fut.result()
-            icon   = "✓" if ok else "✗"
+            icon = "✓" if ok else "✗"
             detail = f" ({err})" if not ok else ""
+            status["agents"][name] = {"state": "ok" if ok else "error", "error": err}
+            _write_agent_status(status)
             print(f"  {icon} {name}{detail}", flush=True)
 
+    status["running"] = False
+    status["completed_at"] = datetime.now().strftime("%H:%M:%S")
+    _write_agent_status(status)
     print(flush=True)
 
 
@@ -346,14 +449,14 @@ def _load_whisper(model_name: str = WHISPER_MODEL):
     return model
 
 
-def _transcribe_audio(model, audio: np.ndarray, timeout: float = 30.0) -> str:
+def _transcribe_audio(model, audio: np.ndarray, timeout: float = 30.0, language: str = "en") -> str:
     """Transcribe one audio chunk. Returns empty string if Whisper hangs."""
     result: list[str] = [""]
     def _run():
         segs, _ = model.transcribe(
             audio,
             beam_size=3,
-            language="en",
+            language=language,
             vad_filter=True,
             vad_parameters={"min_silence_duration_ms": 500},
         )
@@ -404,7 +507,7 @@ def _maybe_auto_dispatch() -> None:
         print(f"  [auto] Dispatching after {new_chunks} new chunks...", flush=True)
 
 
-def _transcription_worker(model) -> None:
+def _transcription_worker(model, language: str = "en") -> None:
     """Background thread: drains _transcribe_q so the audio loop never blocks.
     After _running becomes False, finishes any items already in the queue
     so _transcribe_q.join() doesn't deadlock."""
@@ -416,7 +519,7 @@ def _transcription_worker(model) -> None:
             if not _running:
                 break   # queue empty and shutdown requested — we're done
             continue
-        text = _transcribe_audio(model, arr)
+        text = _transcribe_audio(model, arr, language=language)
         if text:
             _append_chunk(text, ts)
             _write_raw_transcript()   # live update — UI sees it within ~0.5s
@@ -425,7 +528,7 @@ def _transcription_worker(model) -> None:
         _transcribe_q.task_done()
 
 
-def record_loop(model, max_minutes: int, silence_minutes: int) -> None:
+def record_loop(model, max_minutes: int, silence_minutes: int, language: str = "en") -> None:
     global _running, _last_speech_time, _dispatch_requested
     try:
         import sounddevice as sd
@@ -453,7 +556,7 @@ def record_loop(model, max_minutes: int, silence_minutes: int) -> None:
     print(f"Mic active — {', '.join(stop_lines)}. Ctrl+C to stop.\n", flush=True)
 
     threading.Thread(target=_keyboard_listener, daemon=True).start()
-    threading.Thread(target=_transcription_worker, args=(model,), daemon=True).start()
+    threading.Thread(target=_transcription_worker, args=(model, language), daemon=True).start()
 
     with sd.InputStream(
         samplerate=SAMPLE_RATE, channels=1, dtype="float32",
@@ -566,6 +669,10 @@ def main() -> None:
         help="Skip recording; re-run all agents on saved transcription.md")
     parser.add_argument("--model",         default=WHISPER_MODEL,
         help=f"Whisper model size (default: {WHISPER_MODEL})")
+    parser.add_argument("--language", default="en",
+        help="Whisper transcription language code (default: en)")
+    parser.add_argument("--agent", default="",
+        help="Only run this specific agent name (use with --dispatch-only)")
     args = parser.parse_args()
 
     OUTPUT_DIR.mkdir(exist_ok=True)
@@ -589,7 +696,7 @@ def main() -> None:
             print(f"ERROR: {tx_file} not found. Record a session first.")
             sys.exit(1)
         transcript = tx_file.read_text()
-        dispatch(transcript)
+        dispatch(transcript, only_agent=args.agent or None)
         return
 
     model = _load_whisper(args.model)
@@ -603,7 +710,7 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _handle_exit)
 
     try:
-        record_loop(model, args.max_minutes, args.silence_stop)
+        record_loop(model, args.max_minutes, args.silence_stop, args.language)
     finally:
         PID_FILE.unlink(missing_ok=True)
         # Wait for any in-flight transcriptions, but not forever

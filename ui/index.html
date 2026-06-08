@@ -2,9 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Meeting Notes</title>
+<title>MeetNotes — Live AI Meeting Assistant</title>
 <script src="/ui/marked.min.js"></script>
 <script src="/ui/mermaid.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/markmap-autoloader@0.16"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -21,7 +22,7 @@
   --calendar: #10b981;
   --notion:   #8b5cf6;
   --research: #f59e0b;
-  --topbar-h: 54px;
+  --topbar-h: 60px;
   --bottombar-h: 52px;
 }
 
@@ -39,78 +40,408 @@ body {
 /* ── Topbar ── */
 .topbar {
   height: var(--topbar-h);
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  background: linear-gradient(135deg, #1e1b4b 0%, #312e81 55%, #4338ca 100%);
+  border-bottom: 1px solid rgba(255,255,255,.08);
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   padding: 0 16px;
   flex-shrink: 0;
+  box-shadow: 0 1px 12px rgba(0,0,0,.35);
 }
 
-.app-icon { font-size: 18px; flex-shrink: 0; }
-
-#meetingName {
-  flex: 1;
-  max-width: 320px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  color: var(--text);
-  font-size: 14px;
-  font-family: inherit;
-  padding: 6px 10px;
-  outline: none;
-  transition: border-color .15s;
-}
-#meetingName:focus { border-color: var(--accent); }
-
-.status-group {
+.brand {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-left: auto;
-}
-
-.dot {
-  width: 8px; height: 8px;
-  border-radius: 50%;
-  background: var(--muted);
   flex-shrink: 0;
-  transition: background .3s;
 }
-.dot.live  { background: var(--green); box-shadow: 0 0 6px var(--green); animation: pulse 2s infinite; }
-.dot.ended { background: var(--muted); }
+.brand-logo { width: 24px; height: 24px; color: #c7d2fe; flex-shrink: 0; }
+.brand-name { font-size: 17px; font-weight: 800; color: #eef2ff; letter-spacing: -.02em; white-space: nowrap; }
 
-@keyframes pulse {
-  0%, 100% { box-shadow: 0 0 4px var(--green); }
-  50%       { box-shadow: 0 0 10px var(--green); }
+.topbar-sep { width: 1px; height: 20px; background: rgba(255,255,255,.15); flex-shrink: 0; }
+
+.meeting-ctx {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 1;
+  min-width: 0;
 }
 
-#statusLabel { font-size: 12px; color: var(--muted); }
-#elapsed     { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 44px; }
+.live-pip {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--green);
+  letter-spacing: .05em;
+  white-space: nowrap;
+  flex-shrink: 0;
+  animation: pip-pulse 2s infinite;
+}
+@keyframes pip-pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
 
-.btn {
-  padding: 6px 14px;
-  border-radius: 7px;
-  border: none;
+.meeting-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #eef2ff;
+  cursor: pointer;
+  border-bottom: 1px dashed transparent;
+  transition: border-color .15s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+}
+.meeting-title:hover { border-bottom-color: rgba(255,255,255,.35); }
+
+#meetingName {
+  background: rgba(255,255,255,.1);
+  border: 1px solid rgba(255,255,255,.3);
+  border-radius: 5px;
+  color: #eef2ff;
+  font-size: 13px;
+  font-family: inherit;
+  padding: 3px 8px;
+  outline: none;
+  width: min(220px, 42vw);
+  min-width: 170px;
+  display: none;
+}
+
+.meeting-elapsed {
+  font-size: 13px;
+  color: rgba(199,210,254,.6);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.topbar-chips {
+  display: flex;
+  gap: 5px;
+  flex-shrink: 0;
+  margin-left: 4px;
+}
+.topbar-chip {
+  padding: 4px 11px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  background: rgba(255,255,255,.09);
+  color: rgba(199,210,254,.65);
+  border: 1px solid rgba(255,255,255,.09);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all .15s;
+  font-family: inherit;
+}
+.topbar-chip:hover { background: rgba(255,255,255,.15); color: #eef2ff; border-color: rgba(255,255,255,.2); }
+.topbar-chip.static { cursor: default; pointer-events: none; }
+
+.topbar-spacer { flex: 1; min-width: 8px; }
+
+.topbar-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
+/* Visible topbar action buttons */
+.topbar-action-btn {
+  background: rgba(255,255,255,.08);
+  border: 1px solid rgba(255,255,255,.12);
+  color: rgba(199,210,254,.85);
+  border-radius: 6px;
+  padding: 6px 13px;
   font-size: 13px;
   font-weight: 500;
+  font-family: inherit;
   cursor: pointer;
-  transition: opacity .15s, transform .1s;
+  transition: all .15s;
   white-space: nowrap;
+  flex-shrink: 0;
+}
+.topbar-action-btn:hover { background: rgba(255,255,255,.16); color: #eef2ff; border-color: rgba(255,255,255,.22); }
+
+/* Topbar mic waveform */
+.topbar-waveform {
+  display: none;
+  align-items: flex-end;
+  gap: 2px;
+  height: 14px;
+  flex-shrink: 0;
+  margin-left: 2px;
+}
+.topbar-waveform.active { display: flex; }
+.tw-bar {
+  width: 2px;
+  border-radius: 1px;
+  background: var(--green);
+  opacity: .85;
+  animation: vol-pulse 0.55s ease-in-out infinite alternate;
+}
+.tw-bar:nth-child(1) { height: 4px;  animation-delay: 0s; }
+.tw-bar:nth-child(2) { height: 9px;  animation-delay: 0.12s; }
+.tw-bar:nth-child(3) { height: 14px; animation-delay: 0.22s; }
+.tw-bar:nth-child(4) { height: 7px;  animation-delay: 0.06s; }
+.tw-bar:nth-child(5) { height: 5px;  animation-delay: 0.16s; }
+.tw-bar:nth-child(6) { height: 11px; animation-delay: 0.09s; }
+.tw-bar:nth-child(7) { height: 3px;  animation-delay: 0.18s; }
+
+/* Bottom bar mic icon */
+.mic-area { display: flex; align-items: center; gap: 6px; }
+.mic-icon {
+  width: 16px; height: 16px;
+  color: var(--muted);
+  flex-shrink: 0;
+  transition: color .25s;
+}
+.mic-icon.active { color: var(--green); }
+
+/* Gear dropdown */
+.gear-wrap { position: relative; }
+.btn-gear {
+  width: 36px; height: 36px;
+  border-radius: 7px;
+  border: 1px solid rgba(255,255,255,.18);
+  background: rgba(255,255,255,.08);
+  color: #c7d2fe;
+  font-size: 17px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .15s;
+  font-family: inherit;
+}
+.btn-gear:hover { background: rgba(255,255,255,.16); }
+
+.gear-dropdown {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.5);
+  padding: 5px;
+  z-index: 300;
+  min-width: 185px;
+  flex-direction: column;
+  gap: 1px;
+}
+.gear-dropdown.open { display: flex; }
+.gear-dropdown button {
+  width: 100%; text-align: left;
+  background: transparent; border: none;
+  color: var(--text); font-size: 13px; font-weight: 500;
+  padding: 8px 12px; border-radius: 6px;
+  cursor: pointer; font-family: inherit; transition: background .1s;
+  white-space: nowrap;
+}
+.gear-dropdown button:hover { background: rgba(99,102,241,.12); }
+.gear-dropdown button:disabled { opacity: .4; cursor: default; }
+.gear-sep { height: 1px; background: var(--border); margin: 3px 4px; }
+
+.btn-pause {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 6px;
+  padding: 5px 9px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all .15s;
+}
+.btn-pause:hover { border-color: var(--accent); color: var(--accent); }
+.btn-pause.paused { border-color: var(--green); color: var(--green); }
+
+/* Record button */
+.btn-record {
+  padding: 7px 16px;
+  border-radius: 8px; border: none;
+  font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: all .15s;
+  white-space: nowrap; font-family: inherit;
+  background: var(--green); color: #fff;
+}
+.btn-record:hover { opacity: .88; }
+.btn-record:active { transform: scale(.96); }
+.btn-record:disabled { opacity: .4; cursor: default; }
+.btn-record.danger { background: var(--red); }
+
+/* Legacy .btn kept for modals */
+.btn {
+  padding: 6px 14px; border-radius: 7px; border: none;
+  font-size: 13px; font-weight: 500; cursor: pointer;
+  transition: opacity .15s, transform .1s; white-space: nowrap;
 }
 .btn:active { transform: scale(.96); }
 .btn:disabled { opacity: .4; cursor: default; pointer-events: none; }
-
 .btn-primary   { background: var(--accent); color: #fff; }
 .btn-primary:hover { opacity: .85; }
-.btn-danger    { background: var(--red); color: #fff; }
-.btn-danger:hover  { opacity: .85; }
 .btn-ghost     { background: transparent; border: 1px solid var(--border); color: var(--text); }
 .btn-ghost:hover   { border-color: var(--accent); }
-.btn-start     { background: var(--green); color: #fff; }
-.btn-start:hover   { opacity: .85; }
+
+/* Status dot lives in bottom bar now */
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex-shrink: 0; transition: background .3s; }
+.dot.live  { background: var(--green); box-shadow: 0 0 6px var(--green); animation: pulse 2s infinite; }
+.dot.ended { background: var(--muted); }
+@keyframes pulse { 0%,100%{box-shadow:0 0 4px var(--green)} 50%{box-shadow:0 0 10px var(--green)} }
+.volume-bars {
+  display: none;
+  align-items: flex-end;
+  gap: 2px;
+  height: 18px;
+}
+.volume-bars.active { display: flex; }
+.vol-bar {
+  width: 3px;
+  background: var(--green);
+  border-radius: 2px;
+  opacity: .7;
+  animation: vol-pulse 0.6s ease-in-out infinite alternate;
+  min-height: 3px;
+}
+.vol-bar:nth-child(1) { animation-delay: 0s;    height: 6px; }
+.vol-bar:nth-child(2) { animation-delay: 0.1s;  height: 12px; }
+.vol-bar:nth-child(3) { animation-delay: 0.2s;  height: 18px; }
+.vol-bar:nth-child(4) { animation-delay: 0.05s; height: 10px; }
+.vol-bar:nth-child(5) { animation-delay: 0.15s; height: 7px; }
+@keyframes vol-pulse {
+  from { transform: scaleY(.4); }
+  to   { transform: scaleY(1);  }
+}
+#statusLabel { font-size: 12px; color: var(--muted); }
+#elapsed { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* ── Provider badge ── */
+.provider-badge {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  background: rgba(255,255,255,.07);
+  color: rgba(199,210,254,.55);
+  border: 1px solid rgba(255,255,255,.1);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background .12s, color .12s;
+  font-family: inherit;
+}
+.provider-badge:hover {
+  background: rgba(99,102,241,.25);
+  color: #c7d2fe;
+  border-color: rgba(99,102,241,.5);
+}
+
+/* ── History modal ── */
+.history-list { display: flex; flex-direction: column; }
+.history-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background .12s;
+}
+.history-item:last-child { border-bottom: none; }
+.history-item:hover { background: rgba(99,102,241,.06); }
+.history-item.expanded { background: rgba(99,102,241,.05); }
+.history-item-header { display: flex; align-items: center; gap: 8px; }
+.history-title { font-size: 13px; font-weight: 600; color: var(--text); flex: 1; }
+.history-ts { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.history-actions { font-size: 11px; color: var(--accent); background: rgba(99,102,241,.12); border-radius: 4px; padding: 1px 6px; white-space: nowrap; }
+.history-preview { font-size: 12px; color: var(--muted); line-height: 1.5; }
+.history-detail {
+  display: none;
+  margin-top: 10px;
+  padding: 12px;
+  background: var(--bg);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  max-height: 320px;
+  overflow-y: auto;
+}
+.history-detail.open { display: block; }
+.history-detail-tabs { display: flex; gap: 2px; margin-bottom: 10px; }
+.history-tab-btn {
+  padding: 3px 10px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .12s;
+  font-family: inherit;
+}
+.history-tab-btn.active { background: var(--accent); color: #fff; }
+.history-tab-btn:not(.active):hover { color: var(--text); }
+
+/* history search + rename */
+.history-search-bar {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-shrink: 0;
+}
+.history-search-input {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 12px;
+  padding: 5px 10px;
+  font-family: inherit;
+  outline: none;
+}
+.history-search-input:focus { border-color: var(--accent); }
+.history-rename-btn {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: inherit;
+  transition: all .12s;
+  flex-shrink: 0;
+}
+.history-rename-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Settings modal */
+.settings-section { display: flex; flex-direction: column; gap: 12px; }
+.settings-label { font-size: 11px; font-weight: 700; letter-spacing: .04em; color: var(--muted); text-transform: uppercase; margin-bottom: 4px; }
+.provider-radio-group { display: flex; gap: 8px; }
+.provider-radio-btn {
+  flex: 1;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+  font-family: inherit;
+  transition: all .15s;
+}
+.provider-radio-btn.selected {
+  border-color: var(--accent);
+  background: rgba(99,102,241,.12);
+  color: var(--text);
+}
+.provider-radio-btn:hover:not(.selected) { border-color: rgba(99,102,241,.4); color: var(--text); }
+.settings-note { font-size: 11px; color: var(--muted); line-height: 1.5; }
+.settings-warning { font-size: 11px; color: var(--research); line-height: 1.5; }
+
+/* Name-meeting modal */
+.name-modal-hint { font-size: 12px; color: var(--muted); line-height: 1.5; }
 
 /* ── Workspace ── */
 .workspace {
@@ -164,26 +495,97 @@ body {
   margin-right: 6px;
 }
 
-/* ── Notes ── */
-#notesBody {
+/* ── Shared prose styles — used by Notes, Q&A, custom agent outputs ── */
+.prose {
   font-size: 13px;
-  line-height: 1.7;
+  line-height: 1.78;
+  color: #cbd5e1;
 }
-#notesBody h1, #notesBody h2 {
-  font-size: 14px;
+.prose > *:first-child { margin-top: 0 !important; }
+.prose h1, .prose h2 {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 22px 0 8px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--border);
+  letter-spacing: -.01em;
+}
+.prose h3 {
+  font-size: 13px;
   font-weight: 600;
   color: var(--text);
-  margin: 16px 0 6px;
-  padding-bottom: 4px;
-  border-bottom: 1px solid var(--border);
+  margin: 16px 0 5px;
 }
-#notesBody h2:first-child { margin-top: 0; }
-#notesBody h3 { font-size: 13px; font-weight: 600; margin: 10px 0 4px; }
-#notesBody p  { margin-bottom: 8px; color: #cbd5e1; }
-#notesBody ul, #notesBody ol { padding-left: 18px; margin-bottom: 8px; }
-#notesBody li { margin-bottom: 3px; color: #cbd5e1; }
-#notesBody strong { color: var(--text); }
-#notesBody code { background: var(--surface); padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+.prose h4 {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  margin: 14px 0 5px;
+}
+.prose p { margin-bottom: 10px; }
+.prose ul, .prose ol { padding-left: 20px; margin-bottom: 10px; }
+.prose li { margin-bottom: 6px; }
+.prose li > p { margin-bottom: 3px; }
+.prose strong { color: var(--text); font-weight: 600; }
+.prose em { color: #94a3b8; font-style: italic; }
+.prose code {
+  background: rgba(99,102,241,.12);
+  border: 1px solid rgba(99,102,241,.22);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 11.5px;
+  color: #c7d2fe;
+  font-family: ui-monospace, "SF Mono", monospace;
+}
+.prose pre {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 12px 14px;
+  margin: 10px 0;
+  overflow-x: auto;
+}
+.prose pre code { background: none; border: none; padding: 0; font-size: 12px; color: var(--text); }
+.prose blockquote {
+  border-left: 2px solid var(--accent);
+  margin: 10px 0;
+  padding: 4px 14px;
+  color: #94a3b8;
+}
+.prose hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 18px 0;
+}
+.prose a { color: var(--accent); text-decoration: none; }
+.prose a:hover { text-decoration: underline; }
+.notes-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+.notes-section-hdr {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255,255,255,.02);
+}
+.notes-icon { font-size: 14px; }
+.notes-section-body { padding: 10px 14px; }
+.notes-section-body.prose p:first-child { margin-top: 0; }
+.notes-section-body.prose p:last-child  { margin-bottom: 0; }
 
 /* ── Tabs (right column) ── */
 .tab-bar {
@@ -228,60 +630,103 @@ body {
 .tab-pane.active { display: block; }
 
 /* ── Action cards ── */
-.filters {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 14px;
-  flex-wrap: wrap;
-}
-.filter-btn {
-  padding: 4px 10px;
-  border-radius: 20px;
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--muted);
-  font-size: 11px;
-  cursor: pointer;
-  transition: all .15s;
-}
-.filter-btn:hover  { border-color: var(--accent); color: var(--text); }
-.filter-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
-
-#cards { display: flex; flex-direction: column; gap: 8px; }
+#cards { display: flex; flex-direction: column; gap: 0; padding: 8px; }
 
 .card {
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px 14px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  padding: 14px 4px;
   display: flex;
   align-items: flex-start;
-  gap: 10px;
-  transition: border-color .15s;
+  gap: 12px;
+  transition: background .12s;
+  position: relative;
 }
-.card:hover { border-color: #3a3d4a; }
-.card.done  { opacity: .4; }
-.card.card-active { border-color: var(--accent); }
+.card:last-child { border-bottom: none; }
+.card:hover { background: rgba(99,102,241,.04); border-radius: 8px; }
+.card.card-done { opacity: .45; }
+.card.card-active { background: rgba(99,102,241,.07); border-radius: 8px; }
 
-.type-badge {
-  flex-shrink: 0;
-  padding: 2px 7px;
+.card-check {
+  width: 17px; height: 17px;
   border-radius: 5px;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: .03em;
-  text-transform: uppercase;
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+
+.card-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.card-title { font-size: 13px; font-weight: 600; color: var(--text); line-height: 1.35; }
+.card-title.struck { text-decoration: line-through; color: var(--muted); }
+
+.owner-badge {
+  display: inline-block; width: fit-content;
+  padding: 1px 8px; border-radius: 20px;
+  font-size: 11px; font-weight: 600;
+  background: rgba(99,102,241,.18); color: #a5b4fc;
+}
+
+.card-detail { font-size: 12px; color: var(--muted); line-height: 1.4; }
+
+.card-footer-row { display: flex; align-items: center; gap: 8px; margin-top: 2px; flex-wrap: wrap; }
+.card-date { font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 3px; }
+
+.type-chip {
+  font-size: 10px; font-weight: 700; letter-spacing: .04em;
+  text-transform: uppercase; padding: 1px 6px; border-radius: 4px;
+}
+.type-chip.tc-email    { background: rgba(14,165,233,.15); color: #38bdf8; }
+.type-chip.tc-calendar { background: rgba(16,185,129,.15); color: #34d399; }
+.type-chip.tc-notion   { background: rgba(139,92,246,.15); color: #a78bfa; }
+.type-chip.tc-research { background: rgba(245,158,11,.15);  color: #fbbf24; }
+.priority-badge { font-size: 10px; padding: 2px 6px; border-radius: 10px; font-weight: 600; }
+.pb-high  { background: rgba(239,68,68,.15);  color: #ef4444; }
+.pb-low   { background: rgba(16,185,129,.15); color: #10b981; }
+
+.card-menu-btn {
+  width: 26px; height: 26px; border-radius: 5px; border: none;
+  background: transparent; color: var(--muted); font-size: 16px;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: background .12s, color .12s; flex-shrink: 0; font-family: inherit;
   margin-top: 1px;
 }
-.badge-email    { background: color-mix(in srgb, var(--email) 15%, transparent);    color: var(--email); }
-.badge-calendar { background: color-mix(in srgb, var(--calendar) 15%, transparent); color: var(--calendar); }
-.badge-notion   { background: color-mix(in srgb, var(--notion) 15%, transparent);   color: var(--notion); }
-.badge-research { background: color-mix(in srgb, var(--research) 15%, transparent); color: var(--research); }
+.card-menu-btn:hover { background: var(--border); color: var(--text); }
 
-.card-body  { flex: 1; min-width: 0; }
-.card-desc  { font-size: 13px; line-height: 1.4; margin-bottom: 4px; }
-.card-meta  { display: flex; gap: 10px; font-size: 11px; color: var(--muted); }
-.card-btns  { display: flex; align-items: center; gap: 6px; flex-shrink: 0; margin-top: 2px; }
+.card-menu-popup {
+  display: none; position: absolute; right: 0; top: 36px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.45);
+  padding: 4px; z-index: 50; flex-direction: column; min-width: 165px;
+}
+.card-menu-popup.open { display: flex; }
+.card-menu-popup button {
+  width: 100%; text-align: left; background: transparent; border: none;
+  color: var(--text); font-size: 12px; font-weight: 500;
+  padding: 7px 10px; border-radius: 5px; cursor: pointer;
+  font-family: inherit; transition: background .1s;
+}
+.card-menu-popup button:hover { background: rgba(99,102,241,.12); }
+
+.add-action-row {
+  padding: 10px 4px 4px;
+  display: flex;
+}
+.add-action-btn {
+  flex: 1; padding: 9px; border-radius: 8px;
+  border: 1px dashed var(--border); background: transparent;
+  color: var(--muted); font-size: 12px; font-weight: 500;
+  cursor: pointer; font-family: inherit; transition: all .15s; text-align: center;
+}
+.add-action-btn:hover { border-color: var(--accent); color: var(--accent); background: rgba(99,102,241,.04); }
+
+/* keep old type-badge for any lingering references */
+.type-badge { flex-shrink:0; padding:2px 7px; border-radius:5px; font-size:10px; font-weight:600; letter-spacing:.03em; text-transform:uppercase; }
+.badge-email    { background:rgba(14,165,233,.15);  color:#38bdf8; }
+.badge-calendar { background:rgba(16,185,129,.15);  color:#34d399; }
+.badge-notion   { background:rgba(139,92,246,.15);  color:#a78bfa; }
+.badge-research { background:rgba(245,158,11,.15);  color:#fbbf24; }
 
 .btn-act {
   padding: 5px 11px;
@@ -310,18 +755,110 @@ body {
 }
 .btn-done:hover { border-color: var(--green); color: var(--green); }
 
-/* ── Q&A ── */
-#qaBody {
-  font-size: 13px;
-  line-height: 1.7;
+/* ── Card send buttons ── */
+/* ── Card send buttons (action items) ── */
+.btn-send {
+  padding: 4px 10px;
+  border-radius: 5px;
+  border: none;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .15s;
+  white-space: nowrap;
+  font-family: inherit;
+  letter-spacing: .01em;
 }
-#qaBody strong { color: var(--text); }
-#qaBody p { margin-bottom: 10px; color: #cbd5e1; }
-#qaBody hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+.btn-send:disabled { opacity: .4; cursor: default; }
+.btn-send.s-email  { background: rgba(14,165,233,.18); color: #38bdf8; }
+.btn-send.s-email:hover  { background: #0ea5e9; color: #fff; }
+.btn-send.s-slack  { background: rgba(99,102,241,.18); color: #818cf8; }
+.btn-send.s-slack:hover  { background: var(--accent); color: #fff; }
+.btn-send.s-notion    { background: rgba(139,92,246,.18); color: #a78bfa; }
+.btn-send.s-notion:hover { background: #8b5cf6; color: #fff; }
+.btn-send.s-calendar  { background: rgba(16,185,129,.18); color: #34d399; }
+.btn-send.s-calendar:hover { background: #10b981; color: #fff; }
+.btn-send.s-research  { background: rgba(245,158,11,.18); color: #fbbf24; }
+.btn-send.s-research:hover { background: #f59e0b; color: #fff; }
+
+/* ── Header export buttons (Notes col + tab bar) ── */
+.hdr-exports {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+}
+.hdr-export-btn {
+  padding: 3px 9px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  font-family: inherit;
+  transition: all .15s;
+  letter-spacing: .01em;
+}
+.hdr-export-btn:disabled { opacity: .4; cursor: default; }
+.hdr-export-btn.hdr-email  { background: rgba(14,165,233,.14); color: #38bdf8; }
+.hdr-export-btn.hdr-email:hover  { background: #0ea5e9; color: #fff; }
+.hdr-export-btn.hdr-slack  { background: rgba(99,102,241,.14); color: #818cf8; }
+.hdr-export-btn.hdr-slack:hover  { background: var(--accent); color: #fff; }
+.hdr-export-btn.hdr-notion { background: rgba(139,92,246,.14); color: #a78bfa; }
+.hdr-export-btn.hdr-notion:hover { background: #8b5cf6; color: #fff; }
+
+/* ── Tab export bar ── */
+.tab-export-bar {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.tab-export-label {
+  font-size: 10px;
+  color: var(--muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  margin-right: 4px;
+}
 
 /* ── Sketch ── */
 #sketchBody svg { max-width: 100%; }
 #sketchBody .mermaid { margin-bottom: 20px; }
+
+/* Sketch tab is flex column to house the toolbar + scrollable body */
+#tab-sketch.active { display: flex !important; flex-direction: column; overflow: hidden; padding: 0; }
+
+.sketch-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.sketch-mode-btn {
+  padding: 3px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .15s;
+  font-family: inherit;
+  letter-spacing: .01em;
+}
+.sketch-mode-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.sketch-mode-btn:not(.active):hover { border-color: var(--accent); color: var(--text); }
+#sketchScrollBody { flex: 1; overflow-y: auto; padding: 16px; }
 
 /* ── Action side panel (overlay) ── */
 .panel-overlay {
@@ -443,39 +980,51 @@ body {
   border-top: 1px solid var(--border);
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   padding: 0 16px;
   flex-shrink: 0;
 }
+.bb-left { flex: 1; display: flex; align-items: center; }
+.bb-center { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.bb-right { flex: 1; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 
-.slack-group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
+/* Export dropdown */
+.export-wrap { position: relative; }
+.btn-export {
+  padding: 6px 12px; border-radius: 7px;
+  border: 1px solid var(--border); background: var(--bg);
+  color: var(--text); font-size: 12px; font-weight: 600;
+  cursor: pointer; font-family: inherit; transition: all .15s;
+  display: flex; align-items: center; gap: 5px;
 }
-#slackWebhook {
-  width: 280px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  color: var(--text);
-  font-family: inherit;
-  font-size: 13px;
-  padding: 6px 10px;
-  outline: none;
-  transition: border-color .15s;
+.btn-export:hover { border-color: var(--accent); color: var(--accent); }
+.export-menu {
+  display: none; position: absolute; bottom: calc(100% + 6px); right: 0;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; box-shadow: 0 -8px 24px rgba(0,0,0,.5);
+  padding: 5px; z-index: 200; min-width: 185px; flex-direction: column; gap: 1px;
 }
-#slackWebhook:focus { border-color: var(--accent); }
-#slackWebhook.shake {
-  animation: shake .3s;
-  border-color: var(--red);
+.export-menu.open { display: flex; }
+.export-menu button {
+  width: 100%; text-align: left; background: transparent; border: none;
+  color: var(--text); font-size: 12px; font-weight: 500;
+  padding: 8px 12px; border-radius: 6px; cursor: pointer;
+  font-family: inherit; transition: background .1s; white-space: nowrap;
 }
-@keyframes shake {
-  0%,100% { transform: translateX(0); }
-  25%      { transform: translateX(-4px); }
-  75%      { transform: translateX(4px); }
+.export-menu button:hover { background: rgba(99,102,241,.12); }
+.export-menu-sep { height: 1px; background: var(--border); margin: 3px 4px; }
+
+.btn-copy-notes {
+  padding: 6px 12px; border-radius: 7px;
+  border: 1px solid var(--border); background: var(--bg);
+  color: var(--text); font-size: 12px; font-weight: 600;
+  cursor: pointer; font-family: inherit; transition: all .15s;
 }
+.btn-copy-notes:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Hidden Slack webhook - lives in Settings modal */
+#slackWebhook { display: none; }
+@keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-4px)} 75%{transform:translateX(4px)} }
 
 /* ── Spinner / empty / toast ── */
 .spinner {
@@ -519,10 +1068,67 @@ body {
 .toast.error { border-color: var(--red); }
 .toast.show  { opacity: 1; transform: translateY(0); }
 
+
+.agent-status-bar {
+  position: fixed;
+  left: 16px;
+  bottom: 64px;
+  z-index: 180;
+  max-width: min(560px, calc(100vw - 32px));
+  background: #10131c;
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 12px;
+  box-shadow: 0 10px 24px rgba(0,0,0,.28);
+}
+.agent-status-bar.ok { border-color: rgba(16,185,129,.55); }
+.agent-status-bar.error { border-color: rgba(239,68,68,.7); }
+.agent-status-bar .muted { color: var(--muted); }
+.agent-error-panel {
+  margin: 14px;
+  padding: 14px 16px;
+  border: 1px solid rgba(239,68,68,.65);
+  border-radius: 8px;
+  background: rgba(127,29,29,.18);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.agent-error-panel strong { display:block; margin-bottom:6px; color:#fecaca; font-size:13px; }
+.agent-error-panel .muted { color: var(--muted); }
+.agent-error-panel code { color:#fca5a5; font-family:var(--mono); font-size:12px; }
+.agent-info-panel {
+  margin: 14px;
+  padding: 14px 16px;
+  border: 1px solid rgba(99,102,241,.5);
+  border-radius: 8px;
+  background: rgba(49,46,129,.18);
+  color: var(--text);
+  font-size: 13px;
+}
+.agent-info-panel .muted { color: var(--muted); margin-top:4px; }
+
 /* scrollbar */
 ::-webkit-scrollbar { width: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #2a2d3a; border-radius: 3px; }
+
+.rerun-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 5px 10px;
+  background: rgba(99,102,241,.08);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+.rerun-btn:hover { background: rgba(99,102,241,.18); color: var(--text); }
 
 /* ── Custom agent tab close ── */
 .tab-close {
@@ -613,22 +1219,162 @@ body {
   border-color: var(--accent);
   color: #fff;
 }
+
+.kbd-hint {
+  font-size: 11px;
+  color: var(--muted);
+  opacity: .6;
+  white-space: nowrap;
+  user-select: none;
+}
+.lang-wrap { display: flex; align-items: center; margin-left: 10px; }
+.lang-select {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 5px;
+  padding: 3px 6px;
+  font-size: 11px;
+  cursor: pointer;
+  outline: none;
+}
+.lang-select:hover { border-color: var(--accent); }
+
+/* ── Mobile nav ── */
+.mobile-nav { display: none; }
+
+/* ── Mobile breakpoint (≤768px) ── */
+@media (max-width: 768px) {
+  /* Workspace stacks — show one column at a time */
+  .workspace { position: relative; }
+  .col {
+    display: none;
+    flex: 1;
+    border-right: none;
+    width: 100%;
+    min-width: 0;
+  }
+  .col.mob-active { display: flex; }
+
+  /* Topbar: tighten up */
+  .brand-name { display: none; }
+  .topbar-chips { display: none; }
+  .topbar { gap: 8px; padding: 0 10px; }
+  .meeting-title { max-width: 130px; }
+
+  /* Bottom bar: tighten */
+  .bottombar { gap: 8px; padding: 0 10px; }
+  .bb-left { display: none; }
+  .kbd-hint { display: none; }
+
+  /* Mobile bottom nav */
+  .mobile-nav {
+    display: flex;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+    height: 54px;
+    z-index: 10;
+  }
+  .mob-nav-btn {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    transition: color .15s;
+    font-family: inherit;
+    padding: 0;
+  }
+  .mob-nav-btn .mob-icon { font-size: 16px; line-height: 1; }
+  .mob-nav-btn.active { color: var(--accent); }
+
+  /* Header export buttons — hide on mobile (use tab switching instead) */
+  .hdr-exports { display: none; }
+  .tab-export-bar { display: none !important; }
+
+  /* Right col tab bar — allow horizontal scroll */
+  .tab-bar { overflow-x: auto; padding-bottom: 0; }
+  .tab-bar::-webkit-scrollbar { display: none; }
+
+  /* Toast position */
+  .toast { bottom: 70px; }
+}
+
+@media (max-width: 480px) {
+  .meeting-ctx { display: none; }
+  .btn { padding: 6px 10px; font-size: 12px; }
+}
 </style>
 </head>
 <body>
 
 <!-- ── Top bar ── -->
 <header class="topbar">
-  <span class="app-icon">🎤</span>
-  <input id="meetingName" placeholder="Meeting name..." maxlength="80">
-  <div class="status-group">
-    <div class="dot" id="dot"></div>
-    <span id="statusLabel">stopped</span>
-    <span id="elapsed"></span>
+  <div class="brand">
+    <svg class="brand-logo" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="8" y="1.5" width="8" height="13" rx="4" fill="currentColor" opacity=".92"/>
+      <line x1="10.5" y1="5.5"  x2="15.5" y2="5.5"  stroke="rgba(30,27,75,.45)" stroke-width="1" stroke-linecap="round"/>
+      <line x1="10.5" y1="8"    x2="15.5" y2="8"    stroke="rgba(30,27,75,.45)" stroke-width="1" stroke-linecap="round"/>
+      <line x1="10.5" y1="10.5" x2="13.5" y2="10.5" stroke="rgba(30,27,75,.45)" stroke-width="1" stroke-linecap="round"/>
+      <path d="M4.5 11.5a7.5 7.5 0 0015 0" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/>
+      <line x1="12" y1="19" x2="12" y2="22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      <line x1="8.5" y1="22" x2="15.5" y2="22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      <circle cx="20" cy="3" r="1" fill="currentColor" opacity=".65"/>
+    </svg>
+    <span class="brand-name">MeetNotes</span>
   </div>
-  <button class="btn btn-ghost" id="newSessionBtn" onclick="newSession()" title="Clear all content and start fresh">New Session</button>
-  <button class="btn btn-ghost" id="dispatchBtn" onclick="triggerDispatch()" disabled title="Send transcript to Claude — generates notes, actions, Q&amp;A, and diagrams">Generate Notes</button>
-  <button class="btn btn-start" id="startStopBtn" onclick="toggleRecording()">Start Recording</button>
+
+  <div class="topbar-sep"></div>
+
+  <!-- Inline meeting name + live indicator + mic waveform + timer -->
+  <div class="meeting-ctx">
+    <span class="live-pip" id="livePip" style="display:none">● LIVE</span>
+    <div class="topbar-waveform" id="topbarWaveform">
+      <span class="tw-bar"></span><span class="tw-bar"></span><span class="tw-bar"></span>
+      <span class="tw-bar"></span><span class="tw-bar"></span><span class="tw-bar"></span>
+      <span class="tw-bar"></span>
+    </div>
+    <span class="meeting-title" id="meetingTitle" onclick="startEditTitle()" title="Click to rename">Untitled Meeting</span>
+    <input id="meetingName" placeholder="Meeting name…" maxlength="80"
+      onblur="saveMeetingTitle()" onkeydown="if(event.key==='Enter'){event.preventDefault();saveMeetingTitle()}else if(event.key==='Escape'){event.preventDefault();cancelEditTitle()}">
+    <span class="meeting-elapsed" id="elapsed"></span>
+  </div>
+
+  <!-- Informational chips -->
+  <div class="topbar-chips">
+    <button class="topbar-chip" id="providerChip" onclick="openSettings()" title="AI provider — click to change">🤖 Checking AI…</button>
+    <span class="topbar-chip static">🎙 Local STT</span>
+  </div>
+
+  <div class="topbar-spacer"></div>
+
+  <!-- Visible action buttons + gear (settings only) + record -->
+  <div class="topbar-right">
+    <button class="topbar-action-btn" onclick="showHistory()" title="View past meetings (⌘H)">⏱ History</button>
+    <button class="topbar-action-btn" onclick="newSession()" title="Start a new session">＋ New</button>
+    <div class="gear-wrap">
+      <button class="btn-gear" id="gearBtn" onclick="toggleGearMenu(event)" title="Settings &amp; more">⚙</button>
+      <div class="gear-dropdown" id="gearDropdown">
+        <button id="dispatchBtn" style="display:none" onclick="dispatchNow(this);closeGearMenu()" title="Run all agents now (⌘D)">⟳ Dispatch Agents</button>
+        <div class="gear-sep" id="rerunSep" style="display:none"></div>
+        <button id="rerunNotesBtn" style="display:none" onclick="rerunBuiltinAgent('note-taker');closeGearMenu()">↻ Re-run Notes</button>
+        <button id="rerunQABtn" style="display:none" onclick="rerunBuiltinAgent('interview-agent');closeGearMenu()">↻ Re-run Q&amp;A</button>
+        <button id="rerunActionsBtn" style="display:none" onclick="rerunBuiltinAgent('action-extractor');closeGearMenu()">↻ Re-run Actions</button>
+        <div class="gear-sep"></div>
+        <button onclick="openSettings();closeGearMenu()">⚙ Settings</button>
+      </div>
+    </div>
+    <button class="btn-pause" id="pauseBtn" onclick="togglePause()" style="display:none" title="Pause/resume recording">⏸</button>
+    <button class="btn-record" id="startStopBtn" onclick="toggleRecording()">▶ Start</button>
+  </div>
 </header>
 
 <!-- ── Workspace ── -->
@@ -647,12 +1393,9 @@ body {
 
   <!-- Notes -->
   <section class="col col-notes">
-    <div class="col-header">
-      Meeting Notes
-      <span style="font-weight:400;font-size:10px;color:var(--muted);margin-left:auto">click Generate Notes →</span>
-    </div>
+    <div class="col-header">Meeting Notes</div>
     <div class="col-body" id="notesBody">
-      <div class="empty">Click <strong>Generate Notes</strong> to summarize transcript with AI.</div>
+      <div class="empty">Notes will appear automatically once recording starts.</div>
     </div>
   </section>
 
@@ -668,17 +1411,10 @@ body {
       <button class="tab-add" id="addAgentBtn" onclick="openAddAgentModal()" title="Add a custom AI agent">+ Agent</button>
     </div>
 
+
     <!-- Actions tab -->
     <div class="tab-pane active col-body" id="tab-actions">
-      <div class="filters">
-        <button class="filter-btn active" data-filter="all">All</button>
-        <button class="filter-btn" data-filter="email">Email</button>
-        <button class="filter-btn" data-filter="calendar">Calendar</button>
-        <button class="filter-btn" data-filter="notion">Notion</button>
-        <button class="filter-btn" data-filter="research">Research</button>
-        <button class="filter-btn" data-filter="done">Done</button>
-      </div>
-      <div id="cards"><div class="empty">No action items yet.</div></div>
+      <div id="cards"><div class="empty">Action items will appear automatically once recording starts.</div></div>
     </div>
 
     <!-- Q&A tab -->
@@ -687,8 +1423,15 @@ body {
     </div>
 
     <!-- Sketch tab -->
-    <div class="tab-pane col-body" id="tab-sketch">
-      <div id="sketchBody"><div class="empty">Diagrams will appear when meeting content warrants them.</div></div>
+    <div class="tab-pane" id="tab-sketch">
+      <div class="sketch-toolbar">
+        <span class="tab-export-label">View</span>
+        <button class="sketch-mode-btn active" id="btnMarkmap" onclick="setSketchMode('markmap',this)">Mindmap</button>
+        <button class="sketch-mode-btn" id="btnMermaid" onclick="setSketchMode('mermaid',this)">Diagrams</button>
+      </div>
+      <div id="sketchScrollBody">
+        <div id="sketchBody"><div class="empty">Diagrams will appear when meeting content warrants them.</div></div>
+      </div>
     </div>
   </section>
 
@@ -696,11 +1439,63 @@ body {
 
 <!-- ── Bottom bar ── -->
 <footer class="bottombar">
-  <div class="slack-group">
-    <input id="slackWebhook" type="url" placeholder="Slack webhook URL (or set SLACK_WEBHOOK_URL env var)">
-    <button class="btn btn-ghost" id="slackBtn" onclick="sendSlack()">📤 Send to Slack</button>
+  <div class="bb-left">
+    <div class="mic-area">
+      <!-- Mic icon -->
+      <svg class="mic-icon" id="micIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="9" y="2" width="6" height="11" rx="3"/>
+        <path d="M19 10a7 7 0 0 1-14 0"/><line x1="12" y1="19" x2="12" y2="22"/>
+        <line x1="8" y1="22" x2="16" y2="22"/>
+      </svg>
+      <!-- Volume bars -->
+      <div class="volume-bars" id="volumeBars">
+        <div class="vol-bar"></div>
+        <div class="vol-bar"></div>
+        <div class="vol-bar"></div>
+        <div class="vol-bar"></div>
+        <div class="vol-bar"></div>
+      </div>
+    </div>
+    <div class="lang-wrap">
+      <select class="lang-select" id="langSelect" onchange="setLanguage(this.value)" title="Transcription language">
+        <option value="en">English</option>
+        <option value="fr">French</option>
+        <option value="de">German</option>
+        <option value="es">Spanish</option>
+        <option value="it">Italian</option>
+        <option value="pt">Portuguese</option>
+        <option value="zh">Chinese</option>
+        <option value="ja">Japanese</option>
+        <option value="ko">Korean</option>
+        <option value="nl">Dutch</option>
+        <option value="ru">Russian</option>
+      </select>
+    </div>
+  </div>
+  <div class="bb-center">
+    <div class="dot" id="dot"></div>
+    <span id="statusLabel">Ready</span>
+  </div>
+  <div class="bb-right">
+    <div class="export-wrap">
+      <button class="btn-export" id="exportDropBtn" onclick="toggleExportMenu(event)">↗ Export ▾</button>
+      <div class="export-menu" id="exportMenu">
+        <button onclick="exportTo('slack','notes',this)">💬 Slack — Notes</button>
+        <button onclick="exportTo('slack','actions',this)">💬 Slack — Actions</button>
+        <div class="export-menu-sep"></div>
+        <button onclick="exportTo('notion','notes',this)">◻ Notion — Notes</button>
+        <button onclick="exportTo('notion','actions',this)">◻ Notion — Actions</button>
+        <div class="export-menu-sep"></div>
+        <button onclick="exportTo('email','notes',this)">✉ Copy Notes as Email</button>
+        <div class="export-menu-sep"></div>
+        <button onclick="copyLiveLink();closeExportMenu()">🔗 Copy Live Share Link</button>
+      </div>
+    </div>
+    <button class="btn-copy-notes" onclick="copyNotes()">📋 Copy Notes</button>
   </div>
 </footer>
+<!-- Hidden Slack webhook + sendSlack (used by Settings modal + exportTo) -->
+<input id="slackWebhook" type="hidden">
 
 <!-- ── Action side panel ── -->
 <div class="panel-overlay" id="panelOverlay" onclick="closePanelOnOverlay(event)">
@@ -715,6 +1510,89 @@ body {
 </div>
 
 <div class="toast" id="toast"></div>
+<div class="agent-status-bar" id="agentStatusBar" style="display:none"></div>
+
+<!-- ── History modal ── -->
+<div class="modal-overlay" id="historyModal" onclick="closeHistoryOnOverlay(event)">
+  <div class="modal" style="width:700px;max-height:88vh;display:flex;flex-direction:column">
+    <div class="modal-header">
+      <h2>Meeting History</h2>
+      <button class="btn-close" onclick="closeHistory()">✕</button>
+    </div>
+    <div class="history-search-bar">
+      <input class="history-search-input" id="historySearch" placeholder="Search by name or content…" oninput="filterHistory(this.value)">
+    </div>
+    <div class="modal-body" id="historyBody" style="padding:0;flex:1">
+      <div class="empty" style="padding:40px">Loading sessions…</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Name-meeting modal ── -->
+<div class="modal-overlay" id="nameMeetingModal">
+  <div class="modal" style="width:440px">
+    <div class="modal-header">
+      <h2 id="nameMeetingTitle">Name this meeting</h2>
+      <button class="btn-close" onclick="cancelNameMeeting()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="name-modal-hint" id="nameMeetingHint">Give this session a name so you can find it in History later.</div>
+      <input class="field-input" id="nameMeetingInput" placeholder="e.g. Product Roadmap Review, Weekly Standup…" maxlength="80" autocomplete="off"
+        onkeydown="if(event.key==='Enter')confirmNameMeeting()">
+    </div>
+    <div class="modal-footer">
+      <button class="btn-primary-full" onclick="confirmNameMeeting()" id="nameMeetingConfirmBtn">Save &amp; Continue</button>
+      <button class="btn-secondary-sm" onclick="skipNameMeeting()">Skip (use auto-name)</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Settings modal ── -->
+<div class="modal-overlay" id="settingsModal" onclick="closeSettingsOnOverlay(event)">
+  <div class="modal" style="width:480px">
+    <div class="modal-header">
+      <h2>Settings</h2>
+      <button class="btn-close" onclick="closeSettings()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="settings-section">
+        <div>
+          <div class="settings-label">AI Provider</div>
+          <div class="provider-radio-group">
+            <button class="provider-radio-btn selected" id="providerBtnClaude" onclick="selectProvider('claude',this)">
+              Claude (Anthropic)
+            </button>
+            <button class="provider-radio-btn" id="providerBtnOpenai" onclick="selectProvider('openai',this)">
+              OpenAI (GPT)
+            </button>
+          </div>
+          <div class="settings-note" style="margin-top:8px">Claude uses the local <code>claude</code> CLI. OpenAI uses the API directly.</div>
+        </div>
+
+        <div id="openaiFields" style="display:none">
+          <div class="settings-label">OpenAI API Key</div>
+          <input class="field-input" id="settingsApiKey" type="password" placeholder="sk-proj-…" autocomplete="off">
+          <div class="settings-label" style="margin-top:10px">Model</div>
+          <input class="field-input" id="settingsModel" placeholder="gpt-4o-mini" value="gpt-4o-mini" autocomplete="off">
+        </div>
+
+        <div>
+          <div class="settings-label">Slack Webhook URL</div>
+          <input class="field-input" id="settingsSlackWebhook" type="url" placeholder="https://hooks.slack.com/services/…" autocomplete="off">
+          <div class="settings-note" style="margin-top:6px">Paste your Incoming Webhook URL from api.slack.com/apps</div>
+        </div>
+
+        <div class="settings-warning" id="settingsSaveNote" style="display:none">
+          Changes apply immediately to AI agents. If the server was started with different settings, restart it to apply everywhere.
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-primary-full" onclick="saveSettings()">Save</button>
+      <button class="btn-secondary-sm" onclick="closeSettings()">Cancel</button>
+    </div>
+  </div>
+</div>
 
 <!-- ── Add Agent modal ── -->
 <div class="modal-overlay" id="addAgentModal" onclick="closeModalOnOverlay(event)">
@@ -749,19 +1627,83 @@ body {
   </div>
 </div>
 
+<!-- ── Mobile bottom nav ── -->
+<nav class="mobile-nav" id="mobileNav">
+  <button class="mob-nav-btn active" data-mob-col="transcript" onclick="switchMobileCol('transcript',this)">
+    <span class="mob-icon">🎙</span>Transcript
+  </button>
+  <button class="mob-nav-btn" data-mob-col="notes" onclick="switchMobileCol('notes',this)">
+    <span class="mob-icon">📋</span>Notes
+  </button>
+  <button class="mob-nav-btn" data-mob-col="right" onclick="switchMobileCol('right',this)">
+    <span class="mob-icon">⚡</span>Actions
+  </button>
+</nav>
+
 <script>
 mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });
 
 // ── State ──────────────────────────────────────────────────────────────────────
 let isRecording    = false;
 let _userStopped   = false;   // true while user explicitly stopped but process still finalizing
+let _isPaused      = false;
 let elapsedSecs    = 0;
 let elapsedTimer   = null;
 let statusPoller   = null;
 let actions        = [];
-let activeFilter   = 'all';
 let activeActionId = null;
 let draftData      = null;
+let _lastContent   = { notes: '', qa: '', sketch: '' };
+let _lastCustomContent = {};  // { agentId: markdownString }
+let _latestAgentStatus = null;
+const UNTITLED_MEETING = 'Untitled Meeting';
+const MEETING_TITLE_STORAGE_KEY = 'meetingnotes.currentTitle';
+let _titleSyncTimer = null;
+
+function normalizeMeetingTitle(name) {
+  return (name || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+}
+
+function getMeetingTitle() {
+  const text = normalizeMeetingTitle(document.getElementById('meetingTitle')?.textContent || '');
+  return text && text !== UNTITLED_MEETING ? text : '';
+}
+
+function setMeetingTitle(name, opts = {}) {
+  const { persist = true, sync = false } = opts;
+  const clean = normalizeMeetingTitle(name);
+  const title = document.getElementById('meetingTitle');
+  const input = document.getElementById('meetingName');
+  if (title) title.textContent = clean || UNTITLED_MEETING;
+  if (input && document.activeElement !== input) input.value = clean;
+  if (persist) {
+    if (clean) localStorage.setItem(MEETING_TITLE_STORAGE_KEY, clean);
+    else localStorage.removeItem(MEETING_TITLE_STORAGE_KEY);
+  }
+  if (sync) syncMeetingTitle(clean);
+}
+
+function syncMeetingTitle(name) {
+  clearTimeout(_titleSyncTimer);
+  _titleSyncTimer = setTimeout(() => {
+    fetch('/control/session-title', {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ name: normalizeMeetingTitle(name) }),
+    }).catch(() => {});
+  }, 150);
+}
+
+async function loadSessionTitle({ infer = false } = {}) {
+  try {
+    const r = await fetch(`/control/session-title${infer ? '?infer=true' : ''}`);
+    const d = await r.json();
+    if (d.name) setMeetingTitle(d.name, { persist: true, sync: false });
+    return d.name || '';
+  } catch {
+    return '';
+  }
+}
 
 // ── Status polling ─────────────────────────────────────────────────────────────
 async function pollStatus() {
@@ -816,7 +1758,12 @@ async function toggleRecording() {
     // ── Start ──────────────────────────────────────────────────
     btn.disabled = true;
     try {
-      const res = await fetch('/control/start', { method: 'POST' });
+      const meetingName = getMeetingTitle();
+      const res = await fetch('/control/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: meetingName }),
+      });
       const d   = await res.json();
       if (!d.ok) {
         toast(d.error || 'Failed to start', 'error');
@@ -838,10 +1785,15 @@ async function toggleRecording() {
 
   } else {
     // ── End Meeting ────────────────────────────────────────────
-    if (!confirm('End the meeting? Final notes will be generated (~60s) and you can send to Slack.')) return;
-    btn.disabled = true;
-    try {
-      const res = await fetch('/control/stop', { method: 'POST' });
+    showNameMeetingModal('end', async (meetingName) => {
+      if (meetingName) setMeetingTitle(meetingName, { persist: true, sync: true });
+      btn.disabled = true;
+      try {
+      const res = await fetch('/control/stop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: meetingName }),
+      });
       const d   = await res.json();
       if (!d.ok) {
         toast(d.error || 'Failed to stop', 'error');
@@ -851,10 +1803,9 @@ async function toggleRecording() {
         _userStopped = true;
         stopElapsedTimer();
         updateRecordingUI();
+        if (d.name) setMeetingTitle(d.name, { persist: true, sync: false });
+        if (d.archived) _historyCache = null;
         toast('Meeting ended — generating final notes (~60s)…');
-        // Highlight Slack button
-        document.getElementById('slackBtn').classList.add('btn-primary');
-        document.getElementById('slackBtn').classList.remove('btn-ghost');
         // Failsafe: if process never exits, reset UI after 120s
         if (_stopTimeout) clearTimeout(_stopTimeout);
         _stopTimeout = setTimeout(() => {
@@ -870,40 +1821,75 @@ async function toggleRecording() {
       toast('Error: ' + e.message, 'error');
       btn.disabled = false;
     }
+    });  // end showNameMeetingModal callback
   }
 }
 
 function updateRecordingUI() {
-  const dot      = document.getElementById('dot');
-  const label    = document.getElementById('statusLabel');
-  const startBtn = document.getElementById('startStopBtn');
-  const dispatch = document.getElementById('dispatchBtn');
-  const hint     = document.getElementById('transcriptHint');
+  const dot         = document.getElementById('dot');
+  const label       = document.getElementById('statusLabel');
+  const startBtn    = document.getElementById('startStopBtn');
+  const hint        = document.getElementById('transcriptHint');
+  const dispatchBtn = document.getElementById('dispatchBtn');
+  const livePip     = document.getElementById('livePip');
+  const elapsed     = document.getElementById('elapsed');
+
+  const waveform = document.getElementById('topbarWaveform');
+  const micIcon  = document.getElementById('micIcon');
+  const vb       = document.getElementById('volumeBars');
 
   if (isRecording) {
     dot.className        = 'dot live';
-    label.textContent    = 'recording';
+    label.textContent    = 'Recording in progress';
     startBtn.textContent = 'End Meeting';
-    startBtn.className   = 'btn btn-danger';
+    startBtn.className   = 'btn-record danger';
     startBtn.disabled    = false;
-    dispatch.disabled    = false;
-    if (hint) hint.style.display = '';
+    if (hint)        hint.style.display = '';
+    if (dispatchBtn) dispatchBtn.style.display = '';
+    if (livePip)     livePip.style.display = '';
+    if (waveform)    waveform.classList.add('active');
+    if (micIcon)     micIcon.classList.add('active');
+    if (vb)          vb.classList.add('active');
+    document.getElementById('pauseBtn').style.display = '';
+    document.getElementById('rerunSep').style.display = '';
+    document.getElementById('rerunNotesBtn').style.display = '';
+    document.getElementById('rerunQABtn').style.display = '';
+    document.getElementById('rerunActionsBtn').style.display = '';
   } else if (_userStopped) {
-    dot.className        = 'dot live';   // keep pulsing — final agents still running
-    label.textContent    = 'finalizing';
+    dot.className        = 'dot live';
+    label.textContent    = 'Finalizing notes…';
     startBtn.textContent = 'Finalizing…';
-    startBtn.className   = 'btn btn-danger';
+    startBtn.className   = 'btn-record';
     startBtn.disabled    = true;
-    dispatch.disabled    = true;
-    if (hint) hint.style.display = 'none';
+    if (hint)        hint.style.display = 'none';
+    if (dispatchBtn) dispatchBtn.style.display = 'none';
+    if (livePip)     livePip.style.display = 'none';
+    if (waveform)    waveform.classList.remove('active');
+    if (micIcon)     micIcon.classList.remove('active');
+    if (vb)          vb.classList.remove('active');
+    document.getElementById('pauseBtn').style.display = 'none'; _isPaused = false;
+    document.getElementById('rerunSep').style.display = 'none';
+    document.getElementById('rerunNotesBtn').style.display = 'none';
+    document.getElementById('rerunQABtn').style.display = 'none';
+    document.getElementById('rerunActionsBtn').style.display = 'none';
   } else {
     dot.className        = 'dot ended';
-    label.textContent    = 'stopped';
-    startBtn.textContent = 'Start Recording';
-    startBtn.className   = 'btn btn-start';
+    label.textContent    = 'Ready';
+    startBtn.textContent = '▶ Start';
+    startBtn.className   = 'btn-record';
     startBtn.disabled    = false;
-    dispatch.disabled    = true;
-    if (hint) hint.style.display = 'none';
+    if (hint)        hint.style.display = 'none';
+    if (dispatchBtn) dispatchBtn.style.display = 'none';
+    if (livePip)     livePip.style.display = 'none';
+    if (elapsed)     elapsed.textContent = '';
+    if (waveform)    waveform.classList.remove('active');
+    if (micIcon)     micIcon.classList.remove('active');
+    if (vb)          vb.classList.remove('active');
+    document.getElementById('pauseBtn').style.display = 'none'; _isPaused = false;
+    document.getElementById('rerunSep').style.display = 'none';
+    document.getElementById('rerunNotesBtn').style.display = 'none';
+    document.getElementById('rerunQABtn').style.display = 'none';
+    document.getElementById('rerunActionsBtn').style.display = 'none';
   }
 }
 
@@ -915,34 +1901,20 @@ function stopElapsedTimer() {
   if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
 }
 
-// ── Dispatch ───────────────────────────────────────────────────────────────────
-let _dispatchTimer = null;
-async function triggerDispatch() {
-  const btn = document.getElementById('dispatchBtn');
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span>Agents running…';
-  if (_dispatchTimer) clearTimeout(_dispatchTimer);
-  try {
-    const r = await fetch('/control/dispatch', { method: 'POST' });
-    const d = await r.json();
-    if (!d.ok) { toast(d.error || 'Dispatch failed', 'error'); }
-    else { toast('Agents running — results will update live'); }
-  } catch (e) {
-    toast(String(e), 'error');
-  }
-  // Re-enable after enough time for agents to finish (~60s max, but allow re-trigger after 15s)
-  _dispatchTimer = setTimeout(() => {
-    btn.disabled = !isRecording;
-    btn.textContent = 'Generate Notes';
-  }, 15000);
-}
-
 // ── New Session ────────────────────────────────────────────────────────────────
 async function newSession() {
-  if (isRecording && !confirm('This will stop the current recording and clear all content. Continue?')) return;
-
+  showNameMeetingModal('new', async (meetingName) => {
   closeAllStreams();
-  await fetch('/control/new-session', { method: 'POST' });
+  const r = await fetch('/control/new-session', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: meetingName }),
+  });
+  const d = await r.json();
+  if (d.archived) {
+    _historyCache = null;
+    toast('Session saved to History', 'ok');
+  }
   connectEventStream();
   // Reset custom agent pane content
   for (const ca of customAgents) {
@@ -956,17 +1928,25 @@ async function newSession() {
   stopElapsedTimer();
   updateRecordingUI();
   document.getElementById('meetingName').value = '';
+  document.getElementById('meetingName').style.display = 'none';
+  setMeetingTitle('', { persist: true, sync: false });
+  document.getElementById('meetingTitle').style.display = '';
   document.getElementById('elapsed').textContent = '';
 
   // Clear all panels
   document.getElementById('transcriptBody').innerHTML = '<div class="empty">Transcript will appear here once recording starts.</div>';
-  document.getElementById('notesBody').innerHTML     = '<div class="empty">Notes will appear after the first agent dispatch.</div>';
-  document.getElementById('qaBody').innerHTML        = '<div class="empty">Q&A will appear after first agent dispatch.</div>';
+  document.getElementById('notesBody').innerHTML     = '<div class="empty">Notes will appear automatically once recording starts.</div>';
+  document.getElementById('qaBody').innerHTML        = '<div class="empty">Q&A will appear automatically once recording starts.</div>';
   document.getElementById('sketchBody').innerHTML    = '<div class="empty">Diagrams will appear when meeting content warrants them.</div>';
+  if (_markmapInstance) { try { _markmapInstance.destroy(); } catch {} _markmapInstance = null; }
+  document.getElementById('sketchScrollBody').style.overflow = '';
   actions = [];
+  _latestAgentStatus = null;
+  document.getElementById('agentStatusBar').style.display = 'none';
   renderCards();
 
   toast('Ready for new session', 'ok');
+  });  // end showNameMeetingModal callback
 }
 
 // ── Single multiplexed SSE stream ─────────────────────────────────────────────
@@ -987,6 +1967,7 @@ function connectEventStream() {
         case 'qa':         if (msg.content) renderQA(msg.content);         break;
         case 'sketch':     if (msg.content) renderSketch(msg.content);     break;
         case 'actions':    actions = msg.data || []; renderCards();         break;
+        case 'agent-status': renderAgentStatus(msg.data || {});              break;
         default:
           if (msg.type?.startsWith('custom-') && msg.content)
             renderCustomAgentOutput(msg.type.slice('custom-'.length), msg.content);
@@ -1010,35 +1991,167 @@ function connectFileStreams()   {}
 function connectActionsStream() {}
 
 // ── Transcript renderer ────────────────────────────────────────────────────────
+const _SPEAKER_COLORS = ['#a5b4fc','#86efac','#fcd34d','#f9a8d4','#7dd3fc','#c4b5fd','#fdba74'];
+const _speakerColorMap = {};
+let   _speakerColorIdx = 0;
+
+function _speakerColor(name) {
+  if (!_speakerColorMap[name]) {
+    _speakerColorMap[name] = _SPEAKER_COLORS[_speakerColorIdx++ % _SPEAKER_COLORS.length];
+  }
+  return _speakerColorMap[name];
+}
+
 function renderTranscript(content) {
   if (!content?.trim()) return;
-  const el     = document.getElementById('transcriptBody');
-  const atBot  = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
-  el.innerHTML = marked.parse(content);
+  const el    = document.getElementById('transcriptBody');
+  const atBot = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+
+  // Render markdown first then apply speaker colors
+  let html = marked.parse(content);
+  html = html.replace(/\*\*([^*:]+):\*\*/g, (_, name) => {
+    const color = _speakerColor(name.trim());
+    return `<strong style="color:${color}">${name}:</strong>`;
+  });
+  // Also handle already-rendered bold: <strong>Name:</strong>
+  html = html.replace(/<strong>([^<:]+):<\/strong>/g, (_, name) => {
+    const trimmed = name.trim();
+    if (trimmed.length > 0 && trimmed.length < 30 && !trimmed.includes('\n')) {
+      const color = _speakerColor(trimmed);
+      return `<strong style="color:${color}">${trimmed}:</strong>`;
+    }
+    return `<strong>${name}:</strong>`;
+  });
+
+  el.innerHTML = html;
   if (atBot) el.scrollTop = el.scrollHeight;
 }
 
 // ── Notes renderer ─────────────────────────────────────────────────────────────
+const _NOTES_SECTIONS = [
+  { heading: 'Meeting Summary', icon: '📋' },
+  { heading: 'Key Points',      icon: '💡' },
+  { heading: 'Decisions Made',  icon: '✅' },
+  { heading: 'Action Items',    icon: '⚡' },
+  { heading: 'Open Questions',  icon: '❓' },
+];
+
 function renderNotes(content) {
   if (!content?.trim()) return;
+  _lastContent.notes = content;
   const el = document.getElementById('notesBody');
-  el.innerHTML = marked.parse(content);
+
+  // Split content by ## headings
+  const parts = content.split(/^(?=## )/m);
+
+  // Check if it has our known sections
+  const hasStructure = _NOTES_SECTIONS.some(s =>
+    content.includes(`## ${s.heading}`));
+
+  if (!hasStructure) {
+    // Fall back to raw markdown
+    el.innerHTML = `<div class="prose">${marked.parse(content)}</div>`;
+    return;
+  }
+
+  let html = '';
+  for (const part of parts) {
+    const headingMatch = part.match(/^## (.+)\n?([\s\S]*)/);
+    if (!headingMatch) {
+      // Preamble before first section
+      const trimmed = part.trim();
+      if (trimmed) html += `<div class="prose" style="padding:12px 0 4px">${marked.parse(trimmed)}</div>`;
+      continue;
+    }
+    const heading = headingMatch[1].trim();
+    const body    = headingMatch[2]?.trim() || '';
+    if (!body) continue;
+
+    const meta  = _NOTES_SECTIONS.find(s => s.heading === heading);
+    const icon  = meta?.icon || '📌';
+    html += `
+      <div class="notes-section">
+        <div class="notes-section-hdr">
+          <span class="notes-icon">${icon}</span>
+          <span>${heading}</span>
+        </div>
+        <div class="notes-section-body prose">${marked.parse(body)}</div>
+      </div>`;
+  }
+
+  el.innerHTML = html || `<div class="prose">${marked.parse(content)}</div>`;
 }
 
 // ── Q&A renderer ──────────────────────────────────────────────────────────────
 function renderQA(content) {
   if (!content?.trim()) return;
-  const el = document.getElementById('qaBody');
-  el.innerHTML = marked.parse(content);
+  _lastContent.qa = content;
+  document.getElementById('qaBody').innerHTML = `<div class="prose">${marked.parse(content)}</div>`;
 }
 
 // ── Sketch renderer ────────────────────────────────────────────────────────────
+let _sketchMode = 'markmap';
+let _markmapTransformer = null;
+let _markmapInstance = null;
+
 async function renderSketch(content) {
   if (!content?.trim()) return;
+  _lastContent.sketch = content;
   const el = document.getElementById('sketchBody');
+  if (_sketchMode === 'markmap') {
+    await _renderMarkmap(content, el);
+  } else {
+    await _renderMermaidBlocks(content, el);
+  }
+}
+
+async function _renderMarkmap(content, el) {
+  const mm = window.markmap;
+  // Wait for autoloader to finish fetching markmap-view and markmap-lib
+  if (mm?.autoLoader?.ready) {
+    try { await mm.autoLoader.ready; } catch {}
+  }
+
+  if (!mm?.Markmap || !mm?.Transformer) {
+    el.innerHTML = '<div class="empty">Mindmap renderer loading…</div>';
+    setTimeout(() => { if (_lastContent.sketch) _renderMarkmap(_lastContent.sketch, document.getElementById('sketchBody')); }, 1000);
+    return;
+  }
+
+  if (!_markmapTransformer) _markmapTransformer = new mm.Transformer();
+
+  const { root } = _markmapTransformer.transform(content);
+  el.innerHTML = '';
+  const scrollEl = document.getElementById('sketchScrollBody');
+  scrollEl.style.overflow = 'hidden';
+
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.style.cssText = 'width:100%;display:block';
+  const bodyH = scrollEl.clientHeight || 480;
+  svg.setAttribute('height', Math.max(bodyH - 8, 460));
+  el.appendChild(svg);
+
+  if (_markmapInstance) { try { _markmapInstance.destroy(); } catch {} }
+  _markmapInstance = mm.Markmap.create(svg, {
+    duration: 300,
+    maxWidth: 220,
+    color: (node) => {
+      const palette = ['#6366f1','#10b981','#f59e0b','#0ea5e9','#8b5cf6','#ef4444'];
+      return palette[node.depth % palette.length];
+    },
+  }, root);
+  setTimeout(() => _markmapInstance?.fit(), 80);
+}
+
+async function _renderMermaidBlocks(content, el) {
+  document.getElementById('sketchScrollBody').style.overflow = '';
   const blocks = [...content.matchAll(/```mermaid\n([\s\S]*?)```/g)];
   if (!blocks.length) {
-    el.innerHTML = '<div class="empty">No diagrams yet...</div>';
+    el.innerHTML = `<div class="empty">No flow diagrams in this content.<br>
+      <button class="btn btn-ghost" style="margin-top:12px;font-size:12px"
+        onclick="setSketchMode('markmap',document.getElementById('btnMarkmap'))">
+        Switch to Mindmap view →
+      </button></div>`;
     return;
   }
   el.innerHTML = '';
@@ -1057,6 +2170,529 @@ async function renderSketch(content) {
   }
 }
 
+function setSketchMode(mode, btn) {
+  _sketchMode = mode;
+  localStorage.setItem('sketchMode', mode);
+  document.querySelectorAll('.sketch-mode-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  if (_lastContent.sketch) renderSketch(_lastContent.sketch);
+}
+
+// ── Dispatch Now ───────────────────────────────────────────────────────────────
+async function dispatchNow(btn) {
+  const orig = btn?.textContent;
+  if (btn) { btn.disabled = true; btn.textContent = '⟳ Running…'; }
+  try {
+    const r = await fetch('/control/dispatch', { method: 'POST' });
+    const d = await r.json();
+    if (d.ok) toast('Agents dispatched — results update shortly', 'ok');
+    else toast(d.error || 'Not running', 'error');
+  } catch (e) { toast(String(e), 'error'); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = orig; } }
+}
+
+// ── Pause/Resume ───────────────────────────────────────────────────────────────
+async function togglePause() {
+  const btn = document.getElementById('pauseBtn');
+  const endpoint = _isPaused ? '/control/resume' : '/control/pause';
+  try {
+    const res = await fetch(endpoint, { method: 'POST' });
+    const d   = await res.json();
+    if (d.ok) {
+      _isPaused = d.paused;
+      btn.textContent = _isPaused ? '▶' : '⏸';
+      btn.title = _isPaused ? 'Resume recording' : 'Pause recording';
+      btn.classList.toggle('paused', _isPaused);
+      const vb = document.getElementById('volumeBars');
+      if (vb) vb.classList.toggle('active', !_isPaused);
+      toast(_isPaused ? 'Recording paused' : 'Recording resumed', 'ok');
+    }
+  } catch (e) { toast(String(e), 'error'); }
+}
+
+// ── History ────────────────────────────────────────────────────────────────────
+let _historyCache = null;
+
+async function showHistory() {
+  document.getElementById('historyModal').classList.add('open');
+  document.getElementById('historySearch').value = '';
+  if (_historyCache) { _renderHistory(_historyCache); return; }
+  document.getElementById('historyBody').innerHTML = '<div class="empty" style="padding:40px">Loading…</div>';
+  try {
+    const r = await fetch('/history');
+    _historyCache = await r.json();
+    _renderHistory(_historyCache);
+  } catch (e) {
+    document.getElementById('historyBody').innerHTML = `<div class="empty" style="padding:40px">Error: ${esc(String(e))}</div>`;
+  }
+}
+
+function closeHistory() {
+  document.getElementById('historyModal').classList.remove('open');
+}
+function closeHistoryOnOverlay(e) {
+  if (e.target === document.getElementById('historyModal')) closeHistory();
+}
+
+function _renderHistory(sessions) {
+  const el = document.getElementById('historyBody');
+  if (!sessions?.length) {
+    el.innerHTML = '<div class="empty" style="padding:40px">No past sessions yet.<br>Sessions are saved automatically when you start a new meeting.</div>';
+    return;
+  }
+  el.innerHTML = `<div class="history-list">${sessions.map(s => `
+    <div class="history-item" id="hist-${esc(s.id)}" onclick="toggleHistoryItem('${esc(s.id)}')">
+      <div class="history-item-header">
+        <span class="history-title">${s.name ? esc(s.name) : 'Untitled Meeting'}</span>
+        ${s.actions ? `<span class="history-actions">${s.actions} actions</span>` : ''}
+        <span class="history-ts">${esc(s.timestamp.replace('_',' '))}</span>
+        <button class="history-rename-btn" onclick="renameHistorySession('${esc(s.id)}','${esc(s.name||'')}',event)" title="Rename">✎ Rename</button>
+      </div>
+      ${s.preview ? `<div class="history-preview">${esc(s.preview)}</div>` : ''}
+      <div class="history-detail" id="hist-detail-${esc(s.id)}">
+        <div class="history-detail-tabs">
+          <button class="history-tab-btn active" onclick="event.stopPropagation();switchHistoryTab('${esc(s.id)}','notes',this)">Notes</button>
+          <button class="history-tab-btn" onclick="event.stopPropagation();switchHistoryTab('${esc(s.id)}','transcript',this)">Transcript</button>
+          <button class="history-tab-btn" onclick="event.stopPropagation();switchHistoryTab('${esc(s.id)}','actions',this)">Actions</button>
+        </div>
+        <div id="hist-content-${esc(s.id)}"><div style="color:var(--muted);font-size:13px">Click to expand…</div></div>
+      </div>
+    </div>`).join('')}</div>`;
+}
+
+const _historyLoaded = {};
+async function toggleHistoryItem(id) {
+  const item   = document.getElementById(`hist-${id}`);
+  const detail = document.getElementById(`hist-detail-${id}`);
+  const isOpen = detail.classList.contains('open');
+
+  // Close all
+  document.querySelectorAll('.history-detail.open').forEach(d => d.classList.remove('open'));
+  document.querySelectorAll('.history-item.expanded').forEach(i => i.classList.remove('expanded'));
+
+  if (!isOpen) {
+    detail.classList.add('open');
+    item.classList.add('expanded');
+    if (!_historyLoaded[id]) {
+      await _loadHistoryContent(id, 'notes');
+      _historyLoaded[id] = 'notes';
+    }
+  }
+}
+
+async function switchHistoryTab(id, tab, btn) {
+  document.querySelectorAll(`#hist-detail-${id} .history-tab-btn`).forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  await _loadHistoryContent(id, tab);
+  _historyLoaded[id] = tab;
+}
+
+async function _loadHistoryContent(id, tab) {
+  const el = document.getElementById(`hist-content-${id}`);
+  el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:8px 0">Loading…</div>';
+
+  const fileMap = { notes: 'meeting-notes.md', transcript: 'transcription.md', actions: 'actions.json' };
+  const file = fileMap[tab];
+
+  try {
+    const r = await fetch(`/history/${encodeURIComponent(id)}/${file}`);
+    const d = await r.json();
+    const content = d.content || '';
+
+    if (!content.trim()) {
+      el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:8px 0">Nothing recorded.</div>';
+      return;
+    }
+
+    if (tab === 'actions') {
+      try {
+        const acts = JSON.parse(content).filter(a => a.status !== 'done');
+        el.innerHTML = acts.length
+          ? acts.map(a => `<div style="padding:4px 0;font-size:12px;display:flex;gap:8px;align-items:baseline">
+              <span class="type-badge badge-${esc(a.type)}" style="flex-shrink:0">${esc(a.type)}</span>
+              <span style="color:var(--text)">${esc(a.description)}</span>
+              ${a.owner ? `<span style="color:var(--muted);font-size:11px">— ${esc(a.owner)}</span>` : ''}
+            </div>`).join('')
+          : '<div style="color:var(--muted);font-size:12px">No action items.</div>';
+      } catch { el.innerHTML = `<pre style="font-size:11px;color:var(--muted)">${esc(content.slice(0,400))}</pre>`; }
+    } else {
+      el.innerHTML = `<div class="prose" style="font-size:12px">${marked.parse(content)}</div>`;
+    }
+  } catch (e) {
+    el.innerHTML = `<div style="color:var(--red);font-size:12px">${esc(String(e))}</div>`;
+  }
+}
+
+function filterHistory(query) {
+  const q = query.trim().toLowerCase();
+  document.querySelectorAll('.history-item').forEach(item => {
+    const title = item.querySelector('.history-title')?.textContent.toLowerCase() || '';
+    const preview = item.querySelector('.history-preview')?.textContent.toLowerCase() || '';
+    item.style.display = (!q || title.includes(q) || preview.includes(q)) ? '' : 'none';
+  });
+}
+
+async function renameHistorySession(id, currentName, e) {
+  e.stopPropagation();
+  const newName = prompt('Rename this session:', currentName);
+  if (newName === null) return;
+  try {
+    await fetch(`/history/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: newName.trim() }),
+    });
+    _historyCache = null;
+    const titleEl = document.querySelector(`#hist-${id} .history-title`);
+    if (titleEl) titleEl.textContent = newName.trim() || 'Untitled Meeting';
+    toast('Renamed', 'ok');
+  } catch (err) { toast('Rename failed: ' + err, 'error'); }
+}
+
+// ── Meeting title inline edit ──────────────────────────────────────────────────
+function startEditTitle() {
+  const title = document.getElementById('meetingTitle');
+  const input = document.getElementById('meetingName');
+  input.value = getMeetingTitle();
+  input.placeholder = 'Name this meeting...';
+  title.style.display = 'none';
+  input.style.display = 'inline-block';
+  input.focus();
+  input.select();
+}
+function saveMeetingTitle() {
+  const input = document.getElementById('meetingName');
+  const title = document.getElementById('meetingTitle');
+  setMeetingTitle(input.value, { persist: true, sync: true });
+  input.style.display = 'none';
+  title.style.display = '';
+}
+function cancelEditTitle() {
+  const input = document.getElementById('meetingName');
+  const title = document.getElementById('meetingTitle');
+  input.value = getMeetingTitle();
+  input.style.display = 'none';
+  title.style.display = '';
+}
+
+// ── Gear dropdown ──────────────────────────────────────────────────────────────
+function toggleGearMenu(e) {
+  e.stopPropagation();
+  const menu = document.getElementById('gearDropdown');
+  const isOpen = menu.classList.contains('open');
+  closeGearMenu();
+  if (!isOpen) {
+    menu.classList.add('open');
+    setTimeout(() => document.addEventListener('click', _closeGearOnOutside, {once:true}), 0);
+  }
+}
+function _closeGearOnOutside(e) {
+  if (!document.getElementById('gearDropdown')?.contains(e.target)) closeGearMenu();
+}
+function closeGearMenu() {
+  document.getElementById('gearDropdown')?.classList.remove('open');
+}
+
+// ── Export dropdown (bottom bar) ───────────────────────────────────────────────
+function toggleExportMenu(e) {
+  e.stopPropagation();
+  const menu = document.getElementById('exportMenu');
+  const isOpen = menu.classList.contains('open');
+  closeExportMenu();
+  if (!isOpen) {
+    menu.classList.add('open');
+    setTimeout(() => document.addEventListener('click', _closeExportOnOutside, {once:true}), 0);
+  }
+}
+function _closeExportOnOutside(e) {
+  if (!document.getElementById('exportMenu')?.contains(e.target) &&
+      e.target !== document.getElementById('exportDropBtn')) closeExportMenu();
+}
+function closeExportMenu() {
+  document.getElementById('exportMenu')?.classList.remove('open');
+}
+
+async function exportTo(dest, source, _btn) {
+  closeExportMenu();
+  if (source === 'notes') {
+    await exportContent('notes', dest === 'email' ? 'email' : dest, _btn);
+  } else if (source === 'actions') {
+    await exportActions(dest, _btn);
+  }
+}
+
+async function copyNotes() {
+  const content = _lastContent.notes || '';
+  if (!content.trim()) { toast('No notes yet', 'error'); return; }
+  try {
+    await navigator.clipboard.writeText(content);
+    toast('Notes copied to clipboard', 'ok');
+  } catch { toast('Copy failed — try manually selecting the text', 'error'); }
+}
+
+// ── Card context menu ──────────────────────────────────────────────────────────
+function toggleCardMenu(id, btn) {
+  const popup = document.getElementById(`cmenu-${id}`);
+  const isOpen = popup?.classList.contains('open');
+  closeCardMenus();
+  if (!isOpen) {
+    popup?.classList.add('open');
+    setTimeout(() => document.addEventListener('click', _closeCardOnOutside, {once:true}), 0);
+  }
+}
+function _closeCardOnOutside() { closeCardMenus(); }
+function closeCardMenus() {
+  document.querySelectorAll('.card-menu-popup.open').forEach(m => m.classList.remove('open'));
+}
+
+async function checkDone(id, checked) {
+  if (checked) {
+    await markDone(id);
+  } else {
+    // Reopen: remove done status
+    actions = actions.map(a => a.id === id ? {...a, status:'pending'} : a);
+    renderCards();
+    try {
+      await fetch('/actions/reopen', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({id}),
+      });
+    } catch {}
+  }
+}
+
+function promptAddAction() {
+  const desc = prompt('Describe the action item:');
+  if (!desc?.trim()) return;
+  const owner = prompt('Owner (leave blank if none):') || '';
+  const newAction = {
+    id: 'manual_' + Date.now(),
+    type: 'notion',
+    description: desc.trim(),
+    owner: owner.trim(),
+    deadline: '',
+    context: '',
+    status: 'pending',
+  };
+  actions.push(newAction);
+  renderCards();
+}
+
+// ── Name-meeting modal ─────────────────────────────────────────────────────────
+let _nameMeetingCallback = null;
+
+function showNameMeetingModal(mode, callback) {
+  _nameMeetingCallback = callback;
+  const modal  = document.getElementById('nameMeetingModal');
+  const title  = document.getElementById('nameMeetingTitle');
+  const hint   = document.getElementById('nameMeetingHint');
+  const input  = document.getElementById('nameMeetingInput');
+  const btn    = document.getElementById('nameMeetingConfirmBtn');
+
+  if (mode === 'end') {
+    title.textContent = 'Save this meeting';
+    hint.textContent  = 'Give this session a name so you can find it in History later. Agents will keep generating final notes after you save.';
+    btn.textContent   = 'Save & End Meeting';
+  } else {
+    title.textContent = 'Save & start new';
+    hint.textContent  = 'Name the current session before clearing it. It will be saved to History.';
+    btn.textContent   = 'Save & Start New';
+  }
+  // Pre-fill from the current meeting title
+  const currentName = getMeetingTitle();
+  input.value = currentName || document.getElementById('meetingName').value.trim();
+  modal.classList.add('open');
+  setTimeout(() => input.focus(), 80);
+}
+
+function confirmNameMeeting() {
+  const name = document.getElementById('nameMeetingInput').value.trim();
+  document.getElementById('nameMeetingModal').classList.remove('open');
+  if (_nameMeetingCallback) _nameMeetingCallback(name);
+  _nameMeetingCallback = null;
+}
+
+function skipNameMeeting() {
+  document.getElementById('nameMeetingModal').classList.remove('open');
+  if (_nameMeetingCallback) _nameMeetingCallback('');
+  _nameMeetingCallback = null;
+}
+
+function cancelNameMeeting() {
+  document.getElementById('nameMeetingModal').classList.remove('open');
+  _nameMeetingCallback = null;
+}
+
+// ── Settings modal ─────────────────────────────────────────────────────────────
+let _settingsProvider = 'openai';
+let _currentProvider = 'openai';
+let _currentModel = 'gpt-4o-mini';
+
+function openSettings() {
+  const modal = document.getElementById('settingsModal');
+  _settingsProvider = _currentProvider || 'openai';
+  // Populate Slack webhook from storage
+  document.getElementById('settingsSlackWebhook').value = localStorage.getItem('slackWebhook') || '';
+  document.getElementById('settingsModel').value = _currentModel || 'gpt-4o-mini';
+  document.getElementById('providerBtnClaude').classList.toggle('selected', _settingsProvider === 'claude');
+  document.getElementById('providerBtnOpenai').classList.toggle('selected', _settingsProvider === 'openai');
+  document.getElementById('openaiFields').style.display = _settingsProvider === 'openai' ? '' : 'none';
+  document.getElementById('settingsSaveNote').style.display = 'none';
+  modal.classList.add('open');
+}
+
+function closeSettings() {
+  document.getElementById('settingsModal').classList.remove('open');
+}
+
+function closeSettingsOnOverlay(e) {
+  if (e.target === document.getElementById('settingsModal')) closeSettings();
+}
+
+function selectProvider(p, btn) {
+  _settingsProvider = p;
+  document.querySelectorAll('.provider-radio-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  document.getElementById('openaiFields').style.display = p === 'openai' ? '' : 'none';
+}
+
+async function saveSettings() {
+  const body = { provider: _settingsProvider };
+  if (_settingsProvider === 'openai') {
+    const key = document.getElementById('settingsApiKey').value.trim();
+    const model = document.getElementById('settingsModel').value.trim() || 'gpt-4o-mini';
+    if (!key && !document.getElementById('settingsApiKey').placeholder.includes('set')) {
+      body.api_key = key;
+    } else if (key) {
+      body.api_key = key;
+    }
+    body.model = model;
+  }
+  try {
+    const r = await fetch('/config/provider', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (d.error) { toast(d.error, 'error'); return; }
+    if (d.provider) _currentProvider = d.provider;
+    if (d.model) _currentModel = d.model;
+    document.getElementById('providerChip').textContent = '🤖 ' + d.label;
+    document.getElementById('settingsSaveNote').style.display = '';
+    // Sync Slack webhook to hidden field
+    const wh = document.getElementById('settingsSlackWebhook').value.trim();
+    document.getElementById('slackWebhook').value = wh;
+    localStorage.setItem('slackWebhook', wh);
+    toast(d.note || 'Settings saved', 'ok');
+    setTimeout(closeSettings, 1200);
+  } catch (e) { toast(String(e), 'error'); }
+}
+
+
+function agentIssueHtml(title, message, provider = '') {
+  const extra = provider ? `<div class="muted">Provider: ${esc(provider)}</div>` : '';
+  return `<div class="agent-error-panel"><strong>${esc(title)}</strong><div>${esc(message || 'Check AI provider settings.')}</div>${extra}</div>`;
+}
+
+function paneCanShowIssue(el) {
+  if (!el) return false;
+  if (el.querySelector('.agent-error-panel')) return true;
+  if (el.querySelector('.empty')) return true;
+  return !el.textContent.trim();
+}
+
+function showAgentIssue(targetId, title, message, provider = '') {
+  const el = document.getElementById(targetId);
+  if (!paneCanShowIssue(el)) return;
+  el.innerHTML = agentIssueHtml(title, message, provider);
+}
+
+function showAgentRunning(targetId, title, provider = '') {
+  const el = document.getElementById(targetId);
+  if (!el || (!el.querySelector('.agent-error-panel') && !el.querySelector('.empty'))) return;
+  const extra = provider ? `<div class="muted">Provider: ${esc(provider)}</div>` : '';
+  el.innerHTML = `<div class="agent-info-panel"><strong>${esc(title)}</strong><div class="muted">Waiting for this agent to finish...</div>${extra}</div>`;
+}
+
+function findAgentStatus(agents, names) {
+  for (const name of names) {
+    if (agents[name]) return [name, agents[name]];
+  }
+  return [names[0], null];
+}
+
+function renderAgentIssuesInTabs(data) {
+  _latestAgentStatus = data;
+  const agents = data.agents || {};
+  const provider = data.provider || data.health?.label || data.health?.provider || 'AI';
+  const providerError = data.health && data.health.ready === false ? data.health.message : '';
+  const builtins = [
+    { names: ['note-taker'], target: 'notesBody', label: 'Notes agent' },
+    { names: ['action-extractor'], target: 'cards', label: 'Action extractor' },
+    { names: ['interview-agent'], target: 'qaBody', label: 'Q&A agent' },
+    { names: ['sketch-artist'], target: 'sketchBody', label: 'Sketch agent' },
+  ];
+
+  for (const item of builtins) {
+    const [agentName, info] = findAgentStatus(agents, item.names);
+    if (info?.state === 'error') {
+      showAgentIssue(item.target, `${item.label} failed`, info.error || 'The AI provider returned an error.', provider);
+    } else if (info?.state === 'running' || info?.state === 'queued') {
+      showAgentRunning(item.target, `${item.label} is running`, provider);
+    } else if (providerError) {
+      showAgentIssue(item.target, 'AI provider is not ready', providerError, provider);
+    }
+  }
+
+  for (const ca of customAgents || []) {
+    const info = agents[ca.name] || agents[ca.id];
+    if (info?.state === 'error') {
+      showAgentIssue(`tab-custom-${ca.id}`, `${ca.name} failed`, info.error || 'The AI provider returned an error.', provider);
+    } else if (info?.state === 'running' || info?.state === 'queued') {
+      showAgentRunning(`tab-custom-${ca.id}`, `${ca.name} is running`, provider);
+    } else if (providerError) {
+      showAgentIssue(`tab-custom-${ca.id}`, 'AI provider is not ready', providerError, provider);
+    }
+  }
+}
+
+function renderAgentStatus(data) {
+  _latestAgentStatus = data;
+  renderAgentIssuesInTabs(data);
+  const el = document.getElementById('agentStatusBar');
+  if (!el) return;
+  const agents = data.agents || {};
+  const entries = Object.entries(agents);
+  const errors = entries.filter(([, v]) => v.state === 'error');
+  const running = entries.filter(([, v]) => v.state === 'running' || v.state === 'queued');
+  if (errors.length) {
+    el.style.display = '';
+    el.className = 'agent-status-bar error';
+    const [name, info] = errors[0];
+    el.innerHTML = `<strong>AI issue:</strong> ${esc(name)} failed. <span class="muted">${esc(info.error || 'Check provider settings.')}</span>`;
+    return;
+  }
+  if (data.health && data.health.ready === false) {
+    el.style.display = '';
+    el.className = 'agent-status-bar error';
+    el.innerHTML = `<strong>AI not ready:</strong> <span class="muted">${esc(data.health.message || '')}</span>`;
+    return;
+  }
+  if (running.length) {
+    el.style.display = '';
+    el.className = 'agent-status-bar';
+    el.innerHTML = `<strong>Agents running</strong> <span class="muted">${running.length} pending via ${esc(data.provider || 'AI')}</span>`;
+    return;
+  }
+  if (entries.length) {
+    el.style.display = '';
+    el.className = 'agent-status-bar ok';
+    el.innerHTML = `<strong>Agents complete</strong> <span class="muted">${entries.length} agents finished</span>`;
+    setTimeout(() => { if (el.classList.contains('ok')) el.style.display = 'none'; }, 3500);
+  }
+}
+
 // ── Cards renderer ─────────────────────────────────────────────────────────────
 const ACT_LABELS = {
   email:    'Draft Email',
@@ -1064,81 +2700,107 @@ const ACT_LABELS = {
   notion:   'Add to Notion',
   research: 'Research',
 };
+const ACT_BTN = {
+  email:    { cls: 's-email',    icon: '✉',  label: 'Draft' },
+  calendar: { cls: 's-calendar', icon: '📅', label: 'Schedule' },
+  notion:   { cls: 's-notion',   icon: '◻',  label: 'Create Task' },
+  research: { cls: 's-research', icon: '🔍', label: 'Research' },
+};
 
 function renderCards() {
-  const filtered = actions.filter(a => {
-    if (activeFilter === 'done') return a.status === 'done';
-    if (activeFilter !== 'all') return a.type === activeFilter && a.status !== 'done';
-    return a.status !== 'done';
-  });
+  const all     = actions;
+  const pending = all.filter(a => a.status !== 'done');
 
-  const pending = actions.filter(a => a.status !== 'done').length;
-  const badge   = document.getElementById('actionsBadge');
-  if (pending > 0) {
-    badge.textContent = pending;
-    badge.style.display = '';
-  } else {
-    badge.style.display = 'none';
-  }
+  const badge = document.getElementById('actionsBadge');
+  badge.textContent   = pending.length || '';
+  badge.style.display = pending.length ? '' : 'none';
 
   const el = document.getElementById('cards');
-  if (!filtered.length) {
-    el.innerHTML = `<div class="empty">${activeFilter === 'done' ? 'No completed actions.' : 'No action items yet.'}</div>`;
+  if (!all.length) {
+    const info = _latestAgentStatus?.agents?.['action-extractor'];
+    if (info?.state === 'error') {
+      el.innerHTML = agentIssueHtml('Action extractor failed', info.error || 'The AI provider returned an error.', _latestAgentStatus.provider || 'AI');
+    } else if (_latestAgentStatus?.health?.ready === false) {
+      el.innerHTML = agentIssueHtml('AI provider is not ready', _latestAgentStatus.health.message || 'Check provider settings.', _latestAgentStatus.health.provider || 'AI');
+    } else {
+      el.innerHTML = '<div class="empty">Action items will appear automatically once recording starts.</div>';
+    }
     return;
   }
 
-  el.innerHTML = filtered.map(a => `
-    <div class="card ${a.status === 'done' ? 'done' : ''} ${a.id === activeActionId ? 'card-active' : ''}" id="card-${a.id}">
-      <span class="type-badge badge-${a.type}">${a.type}</span>
+  el.innerHTML = all.map(a => {
+    const done = a.status === 'done';
+    return `
+    <div class="card ${done ? 'card-done' : ''} ${a.id === activeActionId ? 'card-active' : ''}" id="card-${a.id}">
+      <input type="checkbox" class="card-check" ${done ? 'checked' : ''}
+        onchange="checkDone('${a.id}',this.checked)" title="Mark done">
       <div class="card-body">
-        <div class="card-desc">${esc(a.description)}</div>
-        <div class="card-meta">
-          ${a.owner    ? `<span>👤 ${esc(a.owner)}</span>` : ''}
-          ${a.deadline ? `<span>📅 ${esc(a.deadline)}</span>` : ''}
+        <div class="card-title ${done ? 'struck' : ''}">${esc(a.description)}</div>
+        ${a.owner ? `<span class="owner-badge">${esc(a.owner)}</span>` : ''}
+        ${a.context ? `<div class="card-detail">${esc(a.context.slice(0,120))}</div>` : ''}
+        <div class="card-footer-row">
+          ${a.deadline ? `<span class="card-date">📅 ${esc(a.deadline)}</span>` : ''}
+          <span class="type-chip tc-${a.type}">${a.type}</span>
+          ${(a.priority||'medium') !== 'medium' ? `<span class="priority-badge pb-${a.priority||'medium'}">${a.priority==='high'?'🔴 High':'🟢 Low'}</span>` : ''}
         </div>
       </div>
-      <div class="card-btns">
-        ${a.status !== 'done' ? `
-          <button class="btn-act" onclick="actOn('${a.id}')">${ACT_LABELS[a.type] || 'Act'}</button>
-          <button class="btn-done" title="Mark done" onclick="markDone('${a.id}')">✓</button>
-        ` : `<span style="color:var(--muted);font-size:11px">done</span>`}
+      <div style="position:relative">
+        <button class="card-menu-btn" onclick="toggleCardMenu('${a.id}',this)" title="Actions">⋮</button>
+        <div class="card-menu-popup" id="cmenu-${a.id}">
+          ${!done ? `<button onclick="actOn('${a.id}',null,this);closeCardMenus()">▶ ${esc(ACT_LABELS[a.type]||'Act')}</button>` : ''}
+          ${!done ? `<button onclick="actOnSlack('${a.id}',this);closeCardMenus()">💬 Send to Slack</button>` : ''}
+          <button onclick="checkDone('${a.id}',${!done});closeCardMenus()">${done ? '↩ Reopen' : '✓ Mark done'}</button>
+        </div>
       </div>
-    </div>`
-  ).join('');
+    </div>`;
+  }).join('') + `<div class="add-action-row"><button class="add-action-btn" onclick="promptAddAction()">＋ Add action item</button></div>`;
 }
 
-// ── Filters ────────────────────────────────────────────────────────────────────
-document.querySelectorAll('.filter-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    activeFilter = btn.dataset.filter;
-    renderCards();
-  });
-});
-
 // ── Act on card ────────────────────────────────────────────────────────────────
-async function actOn(id) {
+async function actOn(id, typeOverride, _btn) {
   const action = actions.find(a => a.id === id);
   if (!action) return;
+  const effectiveAction = typeOverride ? {...action, type: typeOverride} : action;
   activeActionId = id;
   renderCards();
-  openPanel(action);
+  openPanel(effectiveAction);
   document.getElementById('panelBody').innerHTML =
-    `<div style="color:var(--muted)"><span class="spinner"></span>Preparing ${action.type}...</div>`;
+    `<div style="color:var(--muted)"><span class="spinner"></span>Preparing ${effectiveAction.type}...</div>`;
   document.getElementById('panelFooter').innerHTML = '';
   try {
     const res = await fetch('/act/draft', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(action),
+      body: JSON.stringify(effectiveAction),
     });
     draftData = await res.json();
     if (draftData.error) { showPanelError(draftData.error); return; }
-    renderPanel(action, draftData);
+    renderPanel(effectiveAction, draftData);
   } catch (e) {
     showPanelError(String(e));
   }
+}
+
+async function actOnSlack(id, _btn) {
+  const action = actions.find(a => a.id === id);
+  if (!action) return;
+  const webhook = document.getElementById('slackWebhook').value.trim();
+  if (!webhook) { toast('Set your Slack webhook URL in Settings (⚙)', 'error'); return; }
+  const origText = _btn?.textContent;
+  if (_btn) { _btn.disabled = true; _btn.textContent = '…'; }
+  try {
+    const lines = [action.description];
+    if (action.owner)    lines.push(`Owner: ${action.owner}`);
+    if (action.deadline) lines.push(`Due: ${action.deadline}`);
+    if (action.context)  lines.push(`_${action.context}_`);
+    const res = await fetch('/slack/send-content', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ webhook_url: webhook, title: `${action.type} action`, content: lines.join('\n') })
+    });
+    const d = await res.json();
+    if (d.error) toast(d.error, 'error'); else toast('Sent to Slack ✓', 'ok');
+  } catch(e) { toast(String(e), 'error'); }
+  finally { if (_btn) { _btn.disabled = false; _btn.textContent = origText; } }
 }
 
 function openPanel(action) {
@@ -1294,43 +2956,178 @@ function copyResearch() {
 }
 
 // ── Tabs ───────────────────────────────────────────────────────────────────────
+let _activeTab = 'actions';
+
 function switchTab(name, btn) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
   btn.classList.add('active');
   document.getElementById(`tab-${name}`).classList.add('active');
+  _activeTab = name;
+  // (tab export bar removed — exports now in bottom bar)
+
+  // Mindmap was rendered while the tab was hidden — fix up dimensions and re-fit
+  if (name === 'sketch' && _sketchMode === 'markmap') {
+    requestAnimationFrame(() => {
+      const scrollEl = document.getElementById('sketchScrollBody');
+      const svg = scrollEl?.querySelector('svg');
+      const bodyH = scrollEl?.clientHeight || 480;
+      if (svg && _markmapInstance) {
+        svg.setAttribute('height', Math.max(bodyH - 8, 460));
+        _markmapInstance.fit();
+      } else if (_lastContent.sketch) {
+        // Never rendered (markmap wasn't ready when content arrived)
+        renderSketch(_lastContent.sketch);
+      }
+    });
+  }
 }
 
-// ── Slack ──────────────────────────────────────────────────────────────────────
-async function sendSlack() {
-  const webhookInput = document.getElementById('slackWebhook');
-  const webhook = webhookInput.value.trim();
-  if (!webhook) {
-    webhookInput.classList.add('shake');
-    setTimeout(() => webhookInput.classList.remove('shake'), 400);
-    toast('Enter a Slack webhook URL', 'error');
+function switchMobileCol(name, btn) {
+  document.querySelectorAll('.col').forEach(c => c.classList.remove('mob-active'));
+  const map = { transcript: 'col-transcript', notes: 'col-notes', right: 'col-right' };
+  const col = document.querySelector('.' + map[name]);
+  if (col) col.classList.add('mob-active');
+  document.querySelectorAll('.mob-nav-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+}
+
+// ── Markdown → Slack mrkdwn converter ─────────────────────────────────────────
+function _mdToSlack(md) {
+  return md
+    .replace(/^#{1,2} (.+)$/gm, '*$1*')         // ## Heading → *Heading*
+    .replace(/^### (.+)$/gm, '_$1_')             // ### → _italic_
+    .replace(/\*\*(.+?)\*\*/g, '*$1*')           // **bold** → *bold*
+    .replace(/^---+$/gm, '─────────────')        // --- → line
+    .replace(/^  - /gm, '    • ')               // indented bullets
+    .replace(/^- /gm, '• ')                     // top-level bullets
+    .replace(/\n{3,}/g, '\n\n')                 // collapse blank lines
+    .trim();
+}
+
+// ── Export ─────────────────────────────────────────────────────────────────────
+async function exportContent(source, dest, _btn) {
+  const content = source.startsWith('custom-')
+    ? _lastCustomContent[source.slice('custom-'.length)] || ''
+    : _lastContent[source] || '';
+  const TITLES = { notes: 'Meeting Notes', qa: 'Q&A Log', sketch: 'Meeting Sketch' };
+  const title = TITLES[source] || source;
+  if (!content.trim()) { toast('No content to export yet', 'error'); return; }
+
+  if (dest === 'email') {
+    navigator.clipboard.writeText(content)
+      .then(() => toast('Copied to clipboard — paste into your email', 'ok'))
+      .catch(() => toast('Copy failed', 'error'));
     return;
   }
-  const btn = document.getElementById('slackBtn');
-  btn.disabled = true;
-  btn.textContent = 'Sending...';
+
+  const origText = _btn?.textContent;
+  if (_btn) { _btn.disabled = true; _btn.textContent = '…'; }
+  try {
+    if (dest === 'slack') {
+      const webhook = document.getElementById('slackWebhook').value.trim();
+      if (!webhook) { toast('Set your Slack webhook URL in Settings (⚙)', 'error'); return; }
+      const slackContent = _mdToSlack(content);
+      const res = await fetch('/slack/send-content', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ webhook_url: webhook, title, content: slackContent })
+      });
+      const d = await res.json();
+      if (d.error) toast(d.error, 'error'); else toast(`${title} sent to Slack ✓`, 'ok');
+    } else if (dest === 'notion') {
+      const res = await fetch('/notion/create-page', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ title, content })
+      });
+      const d = await res.json();
+      if (d.error) toast(d.error, 'error');
+      else { toast('Added to Notion ✓', 'ok'); if (d.url) window.open(d.url, '_blank'); }
+    }
+  } catch(e) { toast(String(e), 'error'); }
+  finally { if (_btn) { _btn.disabled = false; _btn.textContent = origText; } }
+}
+
+function exportActiveTab(dest, btn) {
+  if (_activeTab === 'actions') { exportActions(dest, btn); return; }
+  exportContent(_activeTab, dest, btn);
+}
+
+async function exportActions(dest, btn) {
+  const pending = actions.filter(a => a.status !== 'done');
+  if (!pending.length) { toast('No pending actions to export', 'error'); return; }
+
+  const orig = btn?.textContent;
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+
+  // Plain-text version (for email/slack)
+  const lines = pending.map(a => {
+    let line = `• [${a.type.toUpperCase()}] ${a.description}`;
+    if (a.owner)    line += ` — ${a.owner}`;
+    if (a.deadline) line += ` (by ${a.deadline})`;
+    return line;
+  });
+  // Markdown version with checkboxes (for Notion → renders as to-do blocks)
+  const mdLines = pending.map(a => {
+    const priFlag = a.priority === 'high' ? ' 🔴' : a.priority === 'low' ? ' 🟢' : '';
+    let line = `- [ ] **[${a.type.toUpperCase()}]** ${a.description}`;
+    if (a.owner)    line += ` — _${a.owner}_`;
+    if (a.deadline) line += ` (by ${a.deadline})`;
+    return line + priFlag;
+  });
+  const titleEl = document.getElementById('meetingTitle');
+  const title   = (titleEl?.textContent !== 'Untitled Meeting' ? titleEl?.textContent : '') || document.getElementById('meetingName').value.trim() || 'Meeting Actions';
+  const content = lines.join('\n');
+  const mdContent = `# Action Items\n\n${mdLines.join('\n')}`;
+
+  try {
+    if (dest === 'email') {
+      const text = `${title}\n${'─'.repeat(title.length)}\n\n${content}`;
+      await navigator.clipboard.writeText(text);
+      toast('Action list copied — paste into your email', 'ok');
+    } else if (dest === 'slack') {
+      const webhook = document.getElementById('slackWebhook').value.trim();
+      if (!webhook) { toast('Set your Slack webhook URL in Settings (⚙)', 'error'); return; }
+      const slackLines = pending.map(a => {
+        let line = `• *[${a.type}]* ${a.description}`;
+        if (a.owner)    line += ` — ${a.owner}`;
+        if (a.deadline) line += ` _(by ${a.deadline})_`;
+        return line;
+      });
+      const res = await fetch('/slack/send-content', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ webhook_url: webhook, title: `Action Items — ${title}`, content: slackLines.join('\n') }),
+      });
+      const d = await res.json();
+      if (d.error) toast(d.error, 'error'); else toast(`${pending.length} actions sent to Slack ✓`, 'ok');
+    } else if (dest === 'notion') {
+      const res = await fetch('/notion/create-page', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: `Action Items — ${title}`, content: mdContent }),
+      });
+      const d = await res.json();
+      if (d.error) toast(d.error, 'error');
+      else { toast('Action list saved to Notion ✓', 'ok'); if (d.url) window.open(d.url, '_blank'); }
+    }
+  } catch (e) { toast(String(e), 'error'); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = orig; } }
+}
+
+// ── Slack (used internally by exportTo / actOnSlack) ──────────────────────────
+async function sendSlack() {
+  const webhook = document.getElementById('slackWebhook').value.trim();
+  if (!webhook) { toast('Set your Slack webhook URL in Settings (⚙)', 'error'); return; }
+  const titleEl = document.getElementById('meetingTitle');
+  const meeting_name = (titleEl?.textContent !== 'Untitled Meeting' ? titleEl?.textContent : '') || '';
   try {
     const res = await fetch('/slack/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        webhook_url:  webhook,
-        meeting_name: document.getElementById('meetingName').value.trim(),
-      }),
+      body: JSON.stringify({ webhook_url: webhook, meeting_name }),
     });
     const d = await res.json();
-    if (d.error) { toast(d.error, 'error'); }
-    else { toast('Sent to Slack ✓', 'ok'); }
-  } catch (e) {
-    toast(String(e), 'error');
-  }
-  btn.disabled = false;
-  btn.textContent = '📤 Send to Slack';
+    if (d.error) toast(d.error, 'error');
+    else toast('Sent to Slack ✓', 'ok');
+  } catch (e) { toast(String(e), 'error'); }
 }
 
 // ── Toast ──────────────────────────────────────────────────────────────────────
@@ -1410,6 +3207,7 @@ async function loadCustomAgents() {
       } catch {}
       connectCustomAgentStream(ca);
     }
+    if (_latestAgentStatus) renderAgentIssuesInTabs(_latestAgentStatus);
   } catch {}
 }
 
@@ -1447,8 +3245,27 @@ function connectCustomAgentStream(ca) {}
 
 function renderCustomAgentOutput(agentId, content) {
   if (!content?.trim()) return;
+  _lastCustomContent[agentId] = content;
+  const pane = document.getElementById(`tab-custom-${agentId}`);
+  if (pane && !pane.querySelector('.rerun-btn')) {
+    const btn = document.createElement('button');
+    btn.className = 'rerun-btn';
+    btn.textContent = '⟳ Re-run';
+    btn.title = 'Re-run this agent on the current transcript';
+    btn.onclick = () => rerunAgent(agentId);
+    pane.insertBefore(btn, pane.firstChild);
+  }
   const el = document.getElementById(`tab-custom-${agentId}`);
-  if (el) el.innerHTML = marked.parse(content);
+  if (el) {
+    // Update or create the prose content div (after the rerun-btn)
+    let proseEl = el.querySelector('.prose');
+    if (!proseEl) {
+      proseEl = document.createElement('div');
+      proseEl.className = 'prose';
+      el.appendChild(proseEl);
+    }
+    proseEl.innerHTML = marked.parse(content);
+  }
 }
 
 async function deleteCustomAgent(agentId) {
@@ -1532,16 +3349,89 @@ async function saveCustomAgent() {
   btn.textContent = 'Add Agent';
 }
 
+// ── Language ───────────────────────────────────────────────────────────────────
+async function setLanguage(lang) {
+  try {
+    await fetch('/config/language', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ language: lang }),
+    });
+    toast(`Language set to ${document.getElementById('langSelect').options[document.getElementById('langSelect').selectedIndex].text}`, 'ok');
+  } catch (e) { toast(String(e), 'error'); }
+}
+
+// ── Live share ──────────────────────────────────────────────────────────────────
+async function copyLiveLink() {
+  const url = location.origin + '/live';
+  try {
+    await navigator.clipboard.writeText(url);
+    toast('Live share link copied — share with meeting participants', 'ok');
+  } catch {
+    toast(url, 'ok'); // fallback: show the URL in toast
+  }
+}
+
+// ── Re-run agents ───────────────────────────────────────────────────────────────
+async function rerunBuiltinAgent(name) {
+  try {
+    const res = await fetch('/control/dispatch-agent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    const d = await res.json();
+    if (d.ok) toast(`Re-running ${name}…`, 'ok');
+    else toast(d.error || 'Failed', 'error');
+  } catch (e) { toast(String(e), 'error'); }
+}
+
+async function rerunAgent(agentId) {
+  const ca = customAgents.find(a => a.id === agentId);
+  const name = ca?.name || agentId;
+  await rerunBuiltinAgent(name);
+}
+
 // ── Boot ───────────────────────────────────────────────────────────────────────
 (async () => {
+  // Restore persisted Slack webhook to hidden field
+  document.getElementById('slackWebhook').value = localStorage.getItem('slackWebhook') || '';
+
+  // Restore active meeting title before the first server refresh.
+  setMeetingTitle(localStorage.getItem(MEETING_TITLE_STORAGE_KEY) || '', { persist: false, sync: false });
+
+  // Restore sketch render mode
+  _sketchMode = localStorage.getItem('sketchMode') || 'markmap';
+  const _smBtn = _sketchMode === 'mermaid' ? document.getElementById('btnMermaid') : document.getElementById('btnMarkmap');
+  if (_smBtn) { document.querySelectorAll('.sketch-mode-btn').forEach(b => b.classList.remove('active')); _smBtn.classList.add('active'); }
+
+  // Fetch active AI provider label → update chip
+  try {
+    const prov = await fetch('/config/provider').then(r => r.json());
+    _currentProvider = prov.provider || _currentProvider;
+    _currentModel = prov.model || _currentModel;
+    const chip = document.getElementById('providerChip');
+    if (chip && prov.label) chip.textContent = '🤖 ' + prov.label;
+    renderAgentStatus({ health: prov, agents: {} });
+  } catch {}
+
+  // Load language preference
+  try {
+    const lr = await fetch('/config/language');
+    const ld = await lr.json();
+    const sel = document.getElementById('langSelect');
+    if (sel && ld.language) sel.value = ld.language;
+  } catch {}
+
   // Parallel: load all existing content + status at once
-  const [txR, notesR, qaR, sketchR, actionsR, statusR] = await Promise.allSettled([
+  const [txR, notesR, qaR, sketchR, actionsR, statusR, titleR] = await Promise.allSettled([
     fetch('/files/transcript').then(r => r.json()),
     fetch('/files/notes').then(r => r.json()),
     fetch('/files/qa').then(r => r.json()),
     fetch('/files/sketch').then(r => r.json()),
     fetch('/actions').then(r => r.json()),
     fetch('/control/status').then(r => r.json()),
+    fetch('/control/session-title?infer=true').then(r => r.json()),
   ]);
 
   if (txR.status     === 'fulfilled' && txR.value.content)     renderTranscript(txR.value.content);
@@ -1549,8 +3439,10 @@ async function saveCustomAgent() {
   if (qaR.status     === 'fulfilled' && qaR.value.content)     renderQA(qaR.value.content);
   if (sketchR.status === 'fulfilled' && sketchR.value.content) renderSketch(sketchR.value.content);
   if (actionsR.status === 'fulfilled') { actions = actionsR.value; renderCards(); }
+  if (titleR.status === 'fulfilled' && titleR.value.name) setMeetingTitle(titleR.value.name, { persist: true, sync: false });
 
   if (statusR.status === 'fulfilled') {
+    if (statusR.value.name && !getMeetingTitle()) setMeetingTitle(statusR.value.name, { persist: true, sync: false });
     isRecording = statusR.value.running;
     if (isRecording) {
       elapsedSecs = statusR.value.elapsed || 0;
@@ -1565,6 +3457,51 @@ async function saveCustomAgent() {
   connectEventStream();
   startPolling();
   await loadCustomAgents();
+
+  // Mobile: show transcript column by default
+  if (window.innerWidth <= 768) {
+    switchMobileCol('transcript', document.querySelector('.mob-nav-btn[data-mob-col="transcript"]'));
+  }
+
+  // ── Keyboard shortcuts ─────────────────────────────────────────────────────────
+  document.addEventListener('keydown', e => {
+    // ⌘↵ / Ctrl↵ — toggle recording
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      e.preventDefault();
+      const btn = document.getElementById('startStopBtn');
+      if (!btn.disabled) toggleRecording();
+      return;
+    }
+    // Escape — close panel or modal
+    if (e.key === 'Escape') {
+      if (document.getElementById('nameMeetingModal').classList.contains('open')) { cancelNameMeeting(); return; }
+      if (document.getElementById('settingsModal').classList.contains('open'))    { closeSettings(); return; }
+      if (document.getElementById('historyModal').classList.contains('open'))     { closeHistory(); return; }
+      if (document.getElementById('addAgentModal').classList.contains('open'))    { closeAddAgentModal(); return; }
+      if (document.getElementById('panelOverlay').classList.contains('open'))     { closePanel(); return; }
+      return;
+    }
+    // ⌘H / Ctrl+H — show history
+    if ((e.metaKey || e.ctrlKey) && e.key === 'h') {
+      e.preventDefault();
+      showHistory();
+      return;
+    }
+    // ⌘D / Ctrl+D — dispatch now
+    if ((e.metaKey || e.ctrlKey) && e.key === 'd') {
+      e.preventDefault();
+      const btn = document.getElementById('dispatchBtn');
+      if (btn && btn.style.display !== 'none' && !btn.disabled) dispatchNow(btn);
+      return;
+    }
+    // ⌘1/2/3 / Ctrl+1/2/3 — switch tabs
+    if ((e.metaKey || e.ctrlKey) && ['1','2','3'].includes(e.key)) {
+      e.preventDefault();
+      const tabs = ['actions','qa','sketch'];
+      const btn = document.querySelector(`[data-tab="${tabs[+e.key - 1]}"]`);
+      if (btn) btn.click();
+    }
+  });
 })();
 </script>
 </body>

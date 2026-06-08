@@ -1,5 +1,4 @@
-import subprocess
-from config import CLAUDE_BIN
+from llm import LLMError, generate_text
 
 
 def draft(action: dict) -> dict:
@@ -15,14 +14,12 @@ Then the delimiter
 Then the email body only — greeting, content, sign-off.
 No meta-commentary."""
 
-    proc = subprocess.run(
-        [CLAUDE_BIN, "-p", prompt, "--tools", ""],
-        capture_output=True, text=True, timeout=60,
-    )
-    if proc.returncode != 0:
-        return {"error": proc.stderr.strip()[:300]}
+    try:
+        output = generate_text(prompt, timeout=60)
+    except LLMError as e:
+        return {"error": str(e)[:300]}
 
-    parts = proc.stdout.strip().split("---BODY---", 1)
+    parts = output.strip().split("---BODY---", 1)
     subject = parts[0].strip() if len(parts) > 1 else "Meeting follow-up"
-    body    = parts[1].strip() if len(parts) > 1 else proc.stdout.strip()
+    body    = parts[1].strip() if len(parts) > 1 else output.strip()
     return {"subject": subject, "body": body}
