@@ -1,6 +1,6 @@
 # MeetNotes
 
-**Fully local AI meeting assistant.** Captures mic audio, transcribes with Whisper on CPU, and dispatches a parallel fleet of Claude or OpenAI agents that produce live notes, action items, Q&A answers, and Mermaid diagrams — all served in a browser tab at `http://localhost:8000`.
+**Local-first AI meeting assistant.** Captures mic audio locally, transcribes with Whisper on CPU, and dispatches Claude or OpenAI agents that produce live notes, action items, Q&A answers, and sketches — all served in a browser tab at `http://localhost:8000`.
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://python.org)
 [![License MIT](https://img.shields.io/badge/license-MIT-green)](#license)
@@ -11,21 +11,21 @@
 
 ## Features
 
-- **Real-time transcription** — `faster-whisper` runs entirely on CPU; no cloud STT service or API key needed
+- **Real-time transcription** — `faster-whisper` runs on your CPU; no cloud speech-to-text service or STT API key needed
 - **Parallel AI agents** — every ~3 speech chunks, five built-in agents fire simultaneously through either Claude CLI or OpenAI:
   - **Transcriber** — clean, timestamped, filler-word-free transcript
   - **Note-taker** — structured notes (summary, key points, decisions, open questions)
   - **Action extractor** — JSON action items tagged as `email`, `calendar`, `notion`, or `research`
   - **Q&A agent** — every question raised in the meeting, answered in real time
-  - **Sketch artist** — Mermaid diagrams auto-generated for any system, process, or workflow discussed
+  - **Sketch artist** — live mindmap-style outline plus optional Mermaid diagrams when the discussion has a real workflow or system to draw
 - **Custom agents** — add up to 8 user-defined agents (sales coach, risk analyst, tech reviewer, etc.) via the `+ Agent` button in the UI
 - **Live browser UI** — single-page app with SSE push every 0.5 s; Markdown via marked.js, diagrams via mermaid.js
 - **Action routing** — one click drafts a Gmail message (mailto), creates a Google Calendar event, pushes a Notion task, or runs an inline research brief
-- **Export anywhere** — send any tab's content (notes, Q&A, custom agents) to Slack or Notion
+- **Follow-up exports** — export notes and action items to Slack or Notion, copy notes for email, or copy a live share link
 - **Auto-dispatch** — agents re-run automatically on accumulated speech; manual trigger with Enter or the UI button
 - **Auto-stop** — configurable silence timeout and hard session ceiling
 - **No database** — all output written as flat files to `~/Desktop/meeting-output/`
-- **Privacy** — audio and transcripts stay on your machine; only the configured AI provider calls (Claude or OpenAI) go to the internet
+- **Privacy model** — audio capture and Whisper transcription are local; transcript text is sent to your configured AI provider for agent generation; output files stay on your machine
 
 ---
 
@@ -63,12 +63,12 @@ Each agent receives the full accumulated transcript plus the current contents of
 | Requirement | Notes |
 |---|---|
 | Python 3.10+ | `python3 --version` to check |
-| [Claude Code CLI](https://claude.ai/code) or OpenAI API key | OpenAI is the default; use `AI_PROVIDER=claude` if you prefer the Claude Code CLI |
+| OpenAI API key with API credits/billing, or [Claude Code CLI](https://claude.ai/code) login | OpenAI is the default; use `AI_PROVIDER=claude` if you prefer Claude CLI |
 | A microphone | Any system mic works; 16 kHz mono capture |
 | macOS or Linux | Windows works but `sounddevice` setup may vary |
 | **Optional** | |
 | `NOTION_TOKEN` + `NOTION_DATABASE_ID` | Push action items and pages to Notion |
-| `SLACK_WEBHOOK_URL` | Send notes and summaries to a Slack channel |
+| `SLACK_WEBHOOK_URL` | Export notes and action items to a Slack channel |
 | Google OAuth credentials | Create Google Calendar events from action items |
 
 ---
@@ -90,6 +90,7 @@ pip install -r requirements.txt
 # 4. Configure OpenAI (default provider)
 cp .env.example .env
 # Edit .env and set OPENAI_API_KEY, or paste the key in Settings after the UI opens.
+# Your OpenAI API project needs API billing/credits; ChatGPT Plus/Pro is separate.
 
 # Optional: use Claude CLI instead
 # Set AI_PROVIDER=claude in .env, then run `claude` once to log in.
@@ -109,15 +110,15 @@ Press **Enter** in the terminal at any time to manually trigger all agents. Pres
 
 ## Configuration
 
-Configuration is read from your shell environment and `.env`. The in-app Settings dialog also writes provider, model, OpenAI key, and Slack webhook values back to `.env` for local use. The AI dependency is provider-specific: Claude uses the Claude Code CLI/auth, while OpenAI uses `OPENAI_API_KEY`.
+Configuration is read from your shell environment and `.env`. The in-app Settings dialog writes provider, model, and OpenAI key values back to `.env`; Slack webhook values are stored in the browser for exports and may also be supplied through `.env`. The AI dependency is provider-specific: Claude uses the Claude Code CLI/auth, while OpenAI uses `OPENAI_API_KEY`.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `AI_PROVIDER` | No | `openai` | AI backend for all agent, email, and research workflows: `claude` or `openai` |
-| `ANTHROPIC_API_KEY` | Provider-specific | — | Used by Claude Code CLI when `AI_PROVIDER=claude` |
+| `ANTHROPIC_API_KEY` | No | — | Optional Claude Code CLI auth; most local setups use `claude /login` instead |
 | `OPENAI_API_KEY` | Provider-specific | — | Required when `AI_PROVIDER=openai` |
 | `OPENAI_MODEL` | No | `gpt-4o-mini` | OpenAI model used for agent, email, and research workflows |
-| `SLACK_WEBHOOK_URL` | No | `""` | Incoming webhook URL from `api.slack.com/apps` → Incoming Webhooks |
+| `SLACK_WEBHOOK_URL` | No | `""` | Incoming webhook URL from `api.slack.com/apps` -> Incoming Webhooks. You can also paste it in Settings for browser-local use. |
 | `NOTION_TOKEN` | No | `""` | Notion integration secret from `notion.so/my-integrations` |
 | `NOTION_DATABASE_ID` | No | `""` | ID of the target Notion database (32-char hex in the page URL) |
 | `GOOGLE_CREDENTIALS_FILE` | No | `~/.config/google/meeting-credentials.json` | OAuth 2.0 credentials JSON from Google Cloud Console |
@@ -142,7 +143,7 @@ claude  # run once if you need to log in
 ./run.sh --both
 ```
 
-The provider switch applies to built-in agents, custom agents, email drafting, and inline research briefs. Whisper transcription still runs locally on CPU in both modes. Provider changes made in Settings are picked up by future agent dispatches; restart a running recording if you want a completely fresh session boundary. The top-bar AI status message surfaces missing keys, quota/rate-limit errors, and per-agent failures so you are not hunting through terminal logs first.
+The provider switch applies to built-in agents, custom agents, email drafting, and inline research briefs. Whisper transcription still runs locally on CPU in both modes. Provider changes made in Settings are safest for the next recording; restart an active recording before relying on a provider change. The top-bar AI status message and affected panes surface missing keys, quota/rate-limit errors, and per-agent failures so you are not hunting through terminal logs first.
 
 ---
 
@@ -160,6 +161,14 @@ The provider switch applies to built-in agents, custom agents, email drafting, a
 ```
 
 You can also start and stop recording from the **Start / Stop** button in the UI. Click the meeting title in the top bar to name the current session before or during recording. When you end or clear a session, the save dialog reuses that title; if you leave it blank, MeetNotes tries to infer a concise title from the final notes before saving to History.
+
+### End-to-end smoke test
+
+1. Run `./run.sh --both` and open `http://localhost:8000`.
+2. Start recording from the UI, then speak for 30-90 seconds until transcript chunks appear.
+3. Agents auto-run after enough transcript chunks accumulate, with a minimum interval of about 60 seconds. You can also press **Enter** in the terminal or use the UI dispatch button to force a run.
+4. Notes, Actions, Q&A, and Sketch update as agent outputs arrive. If an AI provider fails, the affected pane shows the provider error directly.
+5. End the meeting from the UI. The session is saved to History, the recorder runs a final dispatch as it exits, and output files remain in `~/Desktop/meeting-output/`.
 
 ### Whisper model selection
 
@@ -185,12 +194,12 @@ Pass `--model` to tune the accuracy/speed tradeoff. The flag is forwarded direct
 | **Notes** | Structured meeting notes: summary, key points, decisions, action items, open questions |
 | **Actions** | Extracted action items with type badge; click any item to draft or route it |
 | **Q&A** | Every question raised in the meeting with an AI-generated answer |
-| **Diagrams** | Mermaid diagrams rendered live (flowchart, sequenceDiagram, mindmap, gantt, etc.) |
+| **Sketch** | Mindmap-style outline rendered live, with optional Mermaid diagrams when the transcript includes a workflow or system |
 | **Custom agents** | One live-updating tab per custom agent you have added |
 
 ### Exporting content
 
-Each content tab has **Send to Slack** and **Send to Notion** buttons that push the tab's rendered Markdown to the configured channel or database. Action items can also be routed individually:
+The bottom **Export** menu currently supports **Slack - Notes**, **Slack - Actions**, **Notion - Notes**, **Notion - Actions**, **Copy Notes as Email**, and **Copy Live Share Link**. Action cards can also be routed individually:
 
 | Action type | What happens |
 |---|---|
@@ -226,7 +235,7 @@ Custom agent definitions persist in `~/.config/meetingnotes/custom_agents.json` 
 2. Enable **Incoming Webhooks** → **Add New Webhook to Workspace** → select a channel.
 3. Copy the webhook URL and set `SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...`.
 
-The "End Meeting" send formats the meeting summary and all pending action items automatically. Individual content tabs can also be pushed via their **Send to Slack** button.
+Use the bottom **Export** menu to send notes or action items to Slack. Ending a meeting saves/finalizes the session; it does not auto-send Slack messages.
 
 ### Notion
 
@@ -234,7 +243,7 @@ The "End Meeting" send formats the meeting summary and all pending action items 
 2. Open the target database page → **Share** → invite your integration.
 3. Copy the database ID from the page URL (the 32-char hex segment) as `NOTION_DATABASE_ID`.
 
-`notion` action items create database entries. Content tabs can be pushed as full pages via **Send to Notion**.
+`notion` action items create database entries. The bottom **Export** menu can also send Notes or Actions as Notion pages.
 
 ### Google Calendar
 
@@ -275,7 +284,7 @@ Additional flags passed after `--both` (or with no flag) are forwarded to `meeti
 | AI panels show quota or 429 errors | Add API billing/credits, use a lower-cost model, or switch providers in Settings |
 | Claude agents fail with login errors | Run `claude /login` in a terminal |
 | UI will not open on port 8000 | If another MeetNotes UI is already running, `run.sh` will reuse it. If a different app owns the port, stop it or run with `MEETINGNOTES_PORT=8001 ./run.sh --both` |
-| Transcript works but notes/actions stay empty | Check the AI Status message in the UI and verify provider settings |
+| Transcript works but notes/actions stay empty | Check the error shown inside the affected pane and verify provider settings/API billing |
 | Actions tab is empty but notes show tasks | The app falls back to parsing the Notes action section; run agents again if it still looks stale |
 | Meeting title says Untitled Meeting | Click the title in the top bar to rename; on end/new-session, the save dialog will persist the title or infer one from notes |
 | OpenAI works in ChatGPT but API returns quota errors | ChatGPT subscription and API billing are separate; add billing/credits in the OpenAI API platform project |

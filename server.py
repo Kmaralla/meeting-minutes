@@ -1181,7 +1181,7 @@ async def set_provider(request: Request):
     status = provider_status()
     label = f"OpenAI · {status.get('model', model)}" if provider == "openai" else "Claude"
     running = (await control_status()).get("running", False)
-    note = "Applies to the next recording or next agent dispatch." if running else "Ready for the next recording."
+    note = "Saved. Restart the current recording for provider changes to affect live agents." if running else "Ready for the next recording."
     return {
         "ok": True,
         "provider": provider,
